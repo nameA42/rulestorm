@@ -4,6 +4,7 @@ import { fileToFieldImage } from './app/fieldImage';
 import { Session } from './app/Session';
 import type { PanelHost } from './debug/PanelHost';
 import { RulePanel } from './debug/RulePanel';
+import { FixedStepper, startHeartbeat } from './game/FixedStepper';
 import { Game } from './game/Game';
 import { FieldMap } from './game/view/FieldMap';
 import { GameScene } from './game/view/GameScene';
@@ -39,6 +40,10 @@ const players = new PlayerSwitch(local); // offline ↔ P2P online
 
 const game = new Game({ rules, seeds, field, players, worldSeed: baseSeed });
 if (urlMode === 'field') game.setRuleMode('field');
+// The simulation clock. Frames drive it while visible; a worker heartbeat keeps it
+// ticking in background tabs so online games don't freeze when you tab away.
+const stepper = new FixedStepper(game);
+startHeartbeat(() => stepper.advance());
 const session = new Session(game, seeds, field, baseSeed, players, local, () => keyboard);
 const dispatch = (c: AppCommand) => session.dispatch(c);
 
@@ -60,7 +65,7 @@ function bootWhenSized() {
     parent: host,
     backgroundColor: '#06070b',
     scale: { mode: Phaser.Scale.RESIZE, width: host.clientWidth, height: host.clientHeight },
-    scene: [new GameScene(game)],
+    scene: [new GameScene(game, stepper)],
   });
 }
 new ResizeObserver(bootWhenSized).observe(host);

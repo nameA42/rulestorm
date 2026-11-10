@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
 import { getRule } from '../../contracts/catalog';
-import { DT, type Game, type RuleChange } from '../Game';
+import type { FixedStepper } from '../FixedStepper';
+import type { Game, RuleChange } from '../Game';
 import { mirrorScale, type Params } from '../params';
 import { arenaBounds, CENTER, MAX_HP, partial, WORLD_H, WORLD_W, type World } from '../world';
 
-const STEP_MS = DT * 1000;
 /** Mix colours by weight. */
 function mix(parts: [number, number][]): number {
   let r = 0, g = 0, b = 0, t = 0;
@@ -21,7 +21,7 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; color: number; size: number }
 
 /**
- * Presentation only: runs the fixed-step loop, draws the world, owns camera
+ * Presentation only: nudges the fixed-step loop each frame, draws the world, owns camera
  * and post-FX. Reads Game/World/Params; never mutates simulation state
  * (except draining the event outbox).
  */
@@ -32,11 +32,8 @@ export class GameScene extends Phaser.Scene {
   private toast!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
   private pausedText!: Phaser.GameObjects.Text;
-  private waiting = false;
-  private waitT = 0;
   private labels = new Map<string, Phaser.GameObjects.Text>();
   private uiCam!: Phaser.Cameras.Scene2D.Camera;
-  private acc = 0;
   private cam = { x: CENTER.x, y: CENTER.y, zoom: 1, angle: 0 };
   private particles: Particle[] = [];
   private history = new Map<string, { x: number; y: number }[]>();
@@ -49,7 +46,7 @@ export class GameScene extends Phaser.Scene {
   } = {};
   private hasFx = false;
 
-  constructor(private readonly game_: Game) {
+  constructor(private readonly game_: Game, private readonly stepper: FixedStepper) {
     super('game');
   }
 
@@ -96,22 +93,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
-    this.acc += Math.min(delta, 250);
-    let steps = 0;
-    this.waiting = false;
-    while (this.acc >= STEP_MS && steps < 8) {
-      if (!this.game_.step()) {
-        // Paused: drop the time. Waiting on inputs (lockstep net play): keep a
-        // little so we can catch up quickly once they arrive.
-        this.waiting = !this.game_.paused;
-        this.acc = this.game_.paused ? 0 : Math.min(this.acc, 300);
-        break;
-      }
-      this.acc -= STEP_MS;
-      steps++;
-    }
-    if (steps >= 8) this.acc = Math.min(this.acc, 300);
-    this.waitT = this.waiting ? this.waitT + delta / 1000 : 0;
+    this.stepper.advance(); // a background heartbeat also calls this when the tab is hidden
 
     const dt = delta / 1000;
     const w = this.game_.world;
@@ -489,7 +471,7 @@ export class GameScene extends Phaser.Scene {
     );
     if (this.game_.paused) {
       this.pausedText.setText('PAUSED\npress P to resume').setVisible(true);
-    } else if (this.waitT > 0.4) {
+    } else if (this.stepper.waitT > 0.4) {
       // Lockstep: someone paused, lagged, or we're still joining.
       this.pausedText.setText(w.tick === 0 && w.players.length === 0 ? 'Connecting…' : 'Waiting for other players…').setVisible(true);
     } else {
