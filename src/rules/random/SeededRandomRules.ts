@@ -38,10 +38,7 @@ export class SeededRandomRules implements RuleGenerator {
     for (const def of rng.shuffle([...this.catalog])) {
       if (active >= target) break;
       if (def.group && usedGroups.has(def.group)) continue;
-      state[def.id] =
-        def.kind === 'toggle'
-          ? 1
-          : Math.round((this.minDegree + (1 - this.minDegree) * rng.next()) * 100) / 100;
+      state[def.id] = Math.round((this.minDegree + (1 - this.minDegree) * rng.next()) * 100) / 100;
       if (def.group) usedGroups.add(def.group);
       active++;
     }

@@ -41,6 +41,17 @@ export interface PlayerEnt extends Body {
   padCd: number;
   portalCd: number;
   stealCd: number;
+  shootCd: number;
+  // ── rule-field exploration
+  /** This player's position in the n-dimensional rule field. */
+  coord: number[];
+  /** The two field dimensions this player's field map shows (and arrows move along). */
+  dimX: number;
+  dimY: number;
+  /** Coins banked for spending on influence. */
+  wallet: number;
+  /** Pull on the shared rule position; decays over time. */
+  influence: number;
 }
 
 export interface EnemyEnt extends Body {
@@ -49,6 +60,8 @@ export interface EnemyEnt extends Body {
   wander: number;
   shootCd: number;
   portalCd: number;
+  /** How much of this enemy has been eaten (Snack Time), 0..1. */
+  bitten: number;
   dead: boolean;
 }
 
@@ -69,7 +82,7 @@ export interface Trail { x: number; y: number; owner: PlayerId; ttl: number }
 
 export type GameEventType =
   | 'pickup' | 'hurt' | 'death' | 'boom' | 'eat' | 'teleport' | 'shoot' | 'split'
-  | 'heal' | 'steal' | 'tag' | 'kill' | 'pad' | 'spawn';
+  | 'heal' | 'steal' | 'tag' | 'kill' | 'pad' | 'spawn' | 'spend';
 export interface GameEvent { type: GameEventType; x: number; y: number; color: number; value?: number }
 
 export interface World {
@@ -93,6 +106,12 @@ export interface World {
   tagImmune: number;
   coinAcc: number;
   enemySpawnCd: number;
+  // ── rule field
+  fieldDims: number;
+  /** Where new players start in the field (differs per world seed). */
+  fieldOrigin: number[];
+  /** The shared, influence-weighted point the rules are sampled at. */
+  fieldCoord: number[];
 }
 
 export function arenaBounds(scale: number): Bounds {
@@ -101,13 +120,15 @@ export function arenaBounds(scale: number): Bounds {
   return { x0: CENTER.x - hw, y0: CENTER.y - hh, x1: CENTER.x + hw, y1: CENTER.y + hh };
 }
 
-export function createWorld(seed: number): World {
+export function createWorld(seed: number, fieldDims = 8): World {
   const rng = new Rng(hash32('world', seed));
+  const origin = Array.from({ length: fieldDims }, () => Math.round(rng.range(-40, 40) * 100) / 100);
   const w: World = {
     tick: 0, time: 0, rng, nextId: 1,
     players: [], enemies: [], coins: [], bullets: [],
     walls: [], pools: [], pads: [], ice: [], portals: [], trails: [], events: [],
     tagIt: null, tagImmune: 0, coinAcc: 0, enemySpawnCd: 0,
+    fieldDims, fieldOrigin: origin, fieldCoord: [...origin],
   };
 
   // Walls: avoid the middle so spawning is always possible.
@@ -178,7 +199,14 @@ export function newPlayer(w: World, info: PlayerInfo, at: Vec): PlayerEnt {
     moveT: 0, lastDirX: 0, lastDirY: 0, lastIntent: { ...IDLE },
     prevAction: false, actionCd: 0, autoT: 0, dashT: 0, shieldT: 0, invulnT: 1.5,
     combo: 0, comboT: 0, distAcc: 0, stillAcc: 0, trailT: 0, padCd: 0, portalCd: 0, stealCd: 0,
+    shootCd: 0,
+    coord: [...w.fieldOrigin], dimX: 0, dimY: Math.min(1, w.fieldDims - 1), wallet: 0, influence: 0,
   };
+}
+
+/** Partial strength of the i-th item of a fractional count (e.g. 3.4 pools → 1,1,1,0.4,0…). */
+export function partial(count: number, i: number): number {
+  return Math.max(0, Math.min(1, count - i));
 }
 
 export function emit(w: World, e: GameEvent) {

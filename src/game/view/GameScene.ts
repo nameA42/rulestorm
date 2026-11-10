@@ -1,12 +1,22 @@
 import Phaser from 'phaser';
 import { getRule } from '../../contracts/catalog';
 import { DT, type Game, type RuleChange } from '../Game';
-import type { Params } from '../params';
-import { arenaBounds, CENTER, MAX_HP, WORLD_H, WORLD_W, type World } from '../world';
+import { mirrorScale, type Params } from '../params';
+import { arenaBounds, CENTER, MAX_HP, partial, WORLD_H, WORLD_W, type World } from '../world';
 
 const STEP_MS = DT * 1000;
-const ACTION_LABEL = { dash: 'Dash', shoot: 'Blaster', shield: 'Shield', blink: 'Blink' } as const;
-const CONTACT_COLOR = { damage: 0xef5350, none: 0x9e9e9e, heal: 0x66bb6a, eat: 0xf48fb1 } as const;
+/** Mix colours by weight. */
+function mix(parts: [number, number][]): number {
+  let r = 0, g = 0, b = 0, t = 0;
+  for (const [c, w] of parts) {
+    if (w <= 0) continue;
+    r += ((c >> 16) & 255) * w; g += ((c >> 8) & 255) * w; b += (c & 255) * w; t += w;
+  }
+  if (t === 0) return 0x9e9e9e;
+  return (Math.round(r / t) << 16) | (Math.round(g / t) << 8) | Math.round(b / t);
+}
+
+const pct = (v: number) => `${Math.round(v * 100)}%`;
 
 interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; color: number; size: number }
 
@@ -114,8 +124,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ── camera & post-processing ─────────────────────────────────────
+  /** World angle → drawn angle under the page-flip. */
+  private A(p: Params, a: number) {
+    return Math.atan2(Math.sin(a), Math.cos(a) * mirrorScale(p));
+  }
+
+  /** World x → drawn x, with the Mirror World page-flip. */
   private X(p: Params, x: number) {
-    return p.mirror ? WORLD_W - x : x;
+    return CENTER.x + (x - CENTER.x) * mirrorScale(p);
   }
 
   private updateCamera(w: World, p: Params, dt: number) {
@@ -166,7 +182,13 @@ export class GameScene extends Phaser.Scene {
     cm.reset();
     if (p.hue > 0) cm.hue((time * 90 * p.hue) % 360, true);
     if (p.night > 0) cm.brightness(1 - 0.55 * p.night, true);
-    if (p.invert) cm.negative(true);
+    if (p.invert > 0.01) {
+      // Blend identity → negative: halfway is a washed-out grey, full is inverted.
+      const k = p.invert;
+      const NEG = [-1, 0, 0, 1, 0, 0, -1, 0, 1, 0, 0, 0, -1, 1, 0, 0, 0, 0, 1, 0];
+      const ID = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
+      cm.multiply(ID.map((v, i) => v + (NEG[i] - v) * k), true);
+    }
 
     if (p.pixelate > 0.02) {
       this.fx.pixel ??= pfx.addPixelate(1);
@@ -207,9 +229,9 @@ export class GameScene extends Phaser.Scene {
       for (let y = 0; y <= WORLD_H; y += s) g.lineBetween(0, y, WORLD_W, y);
       const pulse = 0.07 + 0.03 * Math.sin(t * 3);
       for (const c of ov.activeCells ?? []) {
-        const x = p.mirror ? WORLD_W - (c.cx + 1) * s : c.cx * s;
-        g.fillStyle(0x7986cb, pulse).fillRect(x, c.cy * s, s, s);
-        g.lineStyle(3, 0x9fa8da, 0.7).strokeRect(x, c.cy * s, s, s);
+        const xa = X(c.cx * s), xb = X((c.cx + 1) * s);
+        g.fillStyle(0x7986cb, pulse).fillRect(Math.min(xa, xb), c.cy * s, Math.abs(xb - xa), s);
+        g.lineStyle(3, 0x9fa8da, 0.7).strokeRect(Math.min(xa, xb), c.cy * s, Math.abs(xb - xa), s);
       }
     }
     // anchor points the current seed was sampled from (timed position mode)
@@ -232,7 +254,7 @@ export class GameScene extends Phaser.Scene {
         g.lineStyle(2, 0x3d5a80, 0.4 * a);
         const off = ((t * 90 * dir) % 80 + 80) % 80;
         for (let x = -80 + off; x < WORLD_W + 80; x += 80) {
-          const vx = X(x), cy = band * 150 + 75, s = dir * (p.mirror ? -1 : 1) * 10;
+          const vx = X(x), cy = band * 150 + 75, s = dir * mirrorScale(p) * 10;
           g.lineBetween(vx - s, cy - 12, vx + s, cy);
           g.lineBetween(vx + s, cy, vx - s, cy + 12);
         }
@@ -240,63 +262,82 @@ export class GameScene extends Phaser.Scene {
     }
 
     // zones
-    for (let i = 0; i < p.icePatches && i < w.ice.length; i++) {
+    // Zones: a fractional count shows the last one partly grown in.
+    for (let i = 0; i < w.ice.length; i++) {
+      const k = partial(p.icePatches, i);
+      if (k <= 0) break;
       const z = w.ice[i];
-      g.fillStyle(0xb3e5fc, 0.14).fillCircle(X(z.x), z.y, z.r);
-      g.lineStyle(2, 0xb3e5fc, 0.3).strokeCircle(X(z.x), z.y, z.r);
+      g.fillStyle(0xb3e5fc, 0.14).fillCircle(X(z.x), z.y, z.r * k);
+      g.lineStyle(2, 0xb3e5fc, 0.3).strokeCircle(X(z.x), z.y, z.r * k);
     }
-    for (let i = 0; i < p.lavaPools && i < w.pools.length; i++) {
+    for (let i = 0; i < w.pools.length; i++) {
+      const k = partial(p.lavaPools, i);
+      if (k <= 0) break;
       const z = w.pools[i];
-      g.fillStyle(0xff5722, 0.55).fillCircle(X(z.x), z.y, z.r);
-      g.lineStyle(3, 0xffab40, 0.5 + 0.3 * Math.sin(t * 4 + i)).strokeCircle(X(z.x), z.y, z.r * (0.85 + 0.1 * Math.sin(t * 3 + i)));
+      g.fillStyle(0xff5722, 0.55).fillCircle(X(z.x), z.y, z.r * k);
+      g.lineStyle(3, 0xffab40, 0.5 + 0.3 * Math.sin(t * 4 + i)).strokeCircle(X(z.x), z.y, z.r * k * (0.85 + 0.1 * Math.sin(t * 3 + i)));
     }
-    for (let i = 0; i < p.speedPads && i < w.pads.length; i++) {
+    for (let i = 0; i < w.pads.length; i++) {
+      const k = partial(p.speedPads, i);
+      if (k <= 0) break;
       const z = w.pads[i];
-      const ang = p.mirror ? Math.PI - z.angle : z.angle;
-      g.fillStyle(0x006064, 0.6).fillCircle(X(z.x), z.y, z.r);
-      g.lineStyle(3, 0x4dd0e1, 0.9).strokeCircle(X(z.x), z.y, z.r);
-      const ex = X(z.x) + Math.cos(ang) * z.r * 0.8, ey = z.y + Math.sin(ang) * z.r * 0.8;
-      g.lineBetween(X(z.x) - Math.cos(ang) * z.r * 0.6, z.y - Math.sin(ang) * z.r * 0.6, ex, ey);
-      g.lineBetween(ex, ey, ex - Math.cos(ang - 0.6) * 10, ey - Math.sin(ang - 0.6) * 10);
-      g.lineBetween(ex, ey, ex - Math.cos(ang + 0.6) * 10, ey - Math.sin(ang + 0.6) * 10);
+      const ang = this.A(p, z.angle);
+      const r = z.r * k;
+      g.fillStyle(0x006064, 0.6).fillCircle(X(z.x), z.y, r);
+      g.lineStyle(3, 0x4dd0e1, 0.9).strokeCircle(X(z.x), z.y, r);
+      const ex = X(z.x) + Math.cos(ang) * r * 0.8, ey = z.y + Math.sin(ang) * r * 0.8;
+      g.lineBetween(X(z.x) - Math.cos(ang) * r * 0.6, z.y - Math.sin(ang) * r * 0.6, ex, ey);
+      g.lineBetween(ex, ey, ex - Math.cos(ang - 0.6) * 10 * k, ey - Math.sin(ang - 0.6) * 10 * k);
+      g.lineBetween(ex, ey, ex - Math.cos(ang + 0.6) * 10 * k, ey - Math.sin(ang + 0.6) * 10 * k);
     }
-    if (p.portals) {
+    if (p.portalSize > 0.05) {
       for (const pair of w.portals) {
         for (const s of [pair.a, pair.b]) {
-          g.fillStyle(pair.color, 0.2).fillCircle(X(s.x), s.y, 30);
-          g.lineStyle(4, pair.color, 0.9).strokeCircle(X(s.x), s.y, 24 + 4 * Math.sin(t * 5));
+          g.fillStyle(pair.color, 0.2).fillCircle(X(s.x), s.y, 30 * p.portalSize);
+          g.lineStyle(4, pair.color, 0.9).strokeCircle(X(s.x), s.y, (24 + 4 * Math.sin(t * 5)) * p.portalSize);
         }
       }
     }
-    if (p.blackHole > 0) {
-      const r = 22 + 14 * p.blackHole;
+    if (p.blackHole > 0.05) {
+      const r = 36 * p.blackHole;
       for (let i = 3; i >= 1; i--) g.lineStyle(2, 0x7c4dff, 0.15 * i).strokeCircle(X(CENTER.x), CENTER.y, r + i * 30 + 8 * Math.sin(t * 2 + i));
       g.fillStyle(0x000000, 1).fillCircle(X(CENTER.x), CENTER.y, r);
       g.lineStyle(3, 0xb388ff, 0.9).strokeCircle(X(CENTER.x), CENTER.y, r);
     }
 
     // walls
-    if (p.wallsVisible) {
-      const stroke = p.wallsHurt ? 0xffeb3b : p.wallBounce > 0 ? 0x66bb6a : 0x59637d;
-      const alpha = p.wallsSolid ? 1 : 0.25;
+    if (p.wallAlpha > 0.02) {
+      const stroke = mix([[0x59637d, 1], [0xffeb3b, p.wallShock / 6], [0x66bb6a, p.wallBounce]]);
+      const alpha = p.wallAlpha * (0.25 + 0.75 * p.wallSolid);
       for (const wall of w.walls) {
-        const x = p.mirror ? WORLD_W - wall.x - wall.w : wall.x;
-        g.fillStyle(0x2b3245, alpha).fillRect(x, wall.y, wall.w, wall.h);
-        g.lineStyle(p.wallsHurt ? 3 : 2, stroke, alpha).strokeRect(x, wall.y, wall.w, wall.h);
+        const xa = X(wall.x), xb = X(wall.x + wall.w);
+        const x = Math.min(xa, xb), ww = Math.abs(xb - xa);
+        g.fillStyle(0x2b3245, alpha).fillRect(x, wall.y, ww, wall.h);
+        g.lineStyle(2 + Math.min(2, p.wallShock / 6), stroke, alpha).strokeRect(x, wall.y, ww, wall.h);
       }
     }
 
     // arena edge (shrinks); dim everything outside it
     const B = arenaBounds(p.arenaScale);
-    const bx0 = p.mirror ? WORLD_W - B.x1 : B.x0;
+    const bx0 = Math.min(X(B.x0), X(B.x1));
     g.fillStyle(0x000000, 0.55);
     g.fillRect(-2000, -2000, WORLD_W + 4000, B.y0 + 2000);
     g.fillRect(-2000, B.y1, WORLD_W + 4000, WORLD_H - B.y1 + 2000);
     g.fillRect(-2000, B.y0, bx0 + 2000, B.y1 - B.y0);
     g.fillRect(bx0 + (B.x1 - B.x0), B.y0, WORLD_W - bx0 - (B.x1 - B.x0) + 2000, B.y1 - B.y0);
-    const edgeColor = { solid: 0x59637d, wrap: 0x4dd0e1, bouncy: 0x81c784, lava: 0xff7043 }[p.edges];
-    g.lineStyle(p.edges === 'lava' ? 6 : 3, edgeColor, p.edges === 'wrap' ? 0.4 + 0.3 * Math.sin(t * 3) : 1);
-    g.strokeRect(bx0, B.y0, B.x1 - B.x0, B.y1 - B.y0);
+    const bw = Math.abs(X(B.x1) - X(B.x0)), bh = B.y1 - B.y0;
+    const edgeColor = mix([[0x59637d, 1], [0x81c784, p.edgeBounce], [0xff7043, p.edgeBurn / 20]]);
+    g.lineStyle(3 + Math.min(4, p.edgeBurn / 10), edgeColor, 1);
+    g.strokeRect(bx0, B.y0, bw, bh);
+    if (p.edgeWrap > 0.01) {
+      // the wrap-around gaps: a glowing centred stretch of each edge
+      const gx = (bw * p.edgeWrap) / 2, gy = (bh * p.edgeWrap) / 2, mx = bx0 + bw / 2, my = B.y0 + bh / 2;
+      g.lineStyle(6, 0x4dd0e1, 0.5 + 0.3 * Math.sin(t * 3));
+      g.lineBetween(mx - gx, B.y0, mx + gx, B.y0);
+      g.lineBetween(mx - gx, B.y1, mx + gx, B.y1);
+      g.lineBetween(bx0, my - gy, bx0, my + gy);
+      g.lineBetween(bx0 + bw, my - gy, bx0 + bw, my + gy);
+    }
 
     // light-cycle trails
     if (w.trails.length) {
@@ -334,13 +375,14 @@ export class GameScene extends Phaser.Scene {
     }
 
     // enemies
-    const ec = CONTACT_COLOR[p.enemyContact];
+    const ec = mix([[0xef5350, p.harm], [0x66bb6a, p.healTouch], [0xf48fb1, p.eatTouch], [0x9e9e9e, 0.15]]);
     for (const e of w.enemies) {
       const ex = X(e.x);
       track(`e${e.id}`, ex, e.y, e.r, ec, p.enemyAlpha);
       g.fillStyle(ec, p.enemyAlpha).fillCircle(ex, e.y, e.r);
-      if (p.enemyShoot > 0) g.lineStyle(3, 0xffab40, p.enemyAlpha).strokeCircle(ex, e.y, e.r + 3);
-      const a = Math.atan2(e.vy, p.mirror ? -e.vx : e.vx);
+      if (p.enemyShoot > 0.02) g.lineStyle(3, 0xffab40, p.enemyAlpha * Math.min(1, p.enemyShoot * 2)).strokeCircle(ex, e.y, e.r + 3);
+      if (e.bitten > 0) g.fillStyle(0x0d1018, p.enemyAlpha).slice(ex, e.y, e.r, 0, Math.PI * 2 * e.bitten).fillPath();
+      const a = this.A(p, Math.atan2(e.vy, e.vx));
       for (const side of [-0.5, 0.5]) {
         const ox = ex + Math.cos(a + side) * e.r * 0.5, oy = e.y + Math.sin(a + side) * e.r * 0.5;
         g.fillStyle(0xffffff, p.enemyAlpha).fillCircle(ox, oy, e.r * 0.25);
@@ -373,7 +415,7 @@ export class GameScene extends Phaser.Scene {
       }
       g.fillStyle(pl.color, alpha).fillCircle(x, pl.y, pl.r);
       g.lineStyle(2, 0xffffff, alpha).strokeCircle(x, pl.y, pl.r);
-      const fa = p.mirror ? Math.PI - pl.facing : pl.facing;
+      const fa = this.A(p, pl.facing);
       g.lineStyle(3, 0x0b0d12, alpha).lineBetween(x, pl.y, x + Math.cos(fa) * pl.r, pl.y + Math.sin(fa) * pl.r);
       // health arc
       const frac = Math.max(0, pl.hp) / MAX_HP;
@@ -412,7 +454,7 @@ export class GameScene extends Phaser.Scene {
 
   private drainEvents(w: World) {
     const p = this.game_.params;
-    const counts = { pickup: 7, hurt: 10, death: 36, boom: 28, eat: 12, teleport: 10, shoot: 2, split: 10, heal: 4, steal: 10, tag: 18, kill: 14, pad: 8, spawn: 8 };
+    const counts = { pickup: 7, hurt: 10, death: 36, boom: 28, eat: 12, teleport: 10, shoot: 2, split: 10, heal: 4, steal: 10, tag: 18, kill: 14, pad: 8, spawn: 8, spend: 22 };
     for (const e of w.events.splice(0)) {
       const n = counts[e.type];
       const speed = e.type === 'boom' || e.type === 'death' ? 380 : 170;
@@ -432,19 +474,18 @@ export class GameScene extends Phaser.Scene {
   private updateHud(w: World, p: Params, dt: number) {
     const lines = w.players.map((pl) => {
       const hp = pl.alive ? `♥ ${Math.ceil(pl.hp).toString().padStart(3)}` : 'respawning…';
-      const score = p.scoresHidden ? '???' : Math.round(pl.score).toString();
       const combo = p.combo > 0 && pl.comboT > 0 && pl.combo > 0 ? `  combo x${pl.combo + 1}` : '';
       const it = w.tagIt === pl.id ? '  ★IT★' : '';
-      return `${pl.name}  ${hp}   ◆ ${score}${combo}${it}`;
+      const pull = pl.influence >= 0.05 ? `  pull +${pl.influence.toFixed(1)}` : '';
+      return `${pl.name}  ${hp}   ◆ ${fuzzyScore(pl.score, p.scoreBlur)}   coins ${pl.wallet}${pull}${combo}${it}`;
     });
-    if (!w.players.some((pl) => pl.id === 'p2')) lines.push('P2: arrow keys to join (same keyboard)');
     this.hud.setText(lines.join('\n'));
 
     const active = Object.values(this.game_.live).filter((v) => v > 0.001).length;
     this.info.setText(`${this.game_.seedStatus()}\n${active} rules live · tick ${w.tick}${this.game_.paused ? ' · PAUSED' : ''}`);
     this.hint.setText(
-      `P1: WASD + Space   P2: Arrows + Enter   Action: ${ACTION_LABEL[p.actionMode]}${p.actionMode === 'dash' && !p.dashEnabled ? ' (disabled)' : ''}\n` +
-      `[P] pause   [T] rule timer   [R] randomize   [\`] panel`,
+      `WASD move · Space: ${actionLabel(p)} · Arrows: travel the field · Z/X C/V: map dims · Q: spend a coin (Shift+Q: all)\n` +
+      '[P] pause   [T] rule timer   [R] randomize   [M] field map   [`] panel',
     );
     if (this.game_.paused) {
       this.pausedText.setText('PAUSED\npress P to resume').setVisible(true);
@@ -473,4 +514,23 @@ export class GameScene extends Phaser.Scene {
     this.toastT = 4;
     this.toast.setAlpha(1);
   }
+}
+
+/** Score as shown on the HUD: blurrier the stronger Mystery Scores is. */
+function fuzzyScore(score: number, blur: number): string {
+  if (blur > 0.92) return '???';
+  if (blur < 0.05) return Math.round(score).toString();
+  const step = Math.pow(10, Math.ceil(blur * 3));
+  return `~${Math.round(score / step) * step}`;
+}
+
+/** What the action button currently does (weights blend). */
+function actionLabel(p: Params): string {
+  const parts: [string, number][] = [
+    ['dash', Math.max(0, 1 - Math.max(p.shootW, p.shieldW, p.blinkW)) * Math.min(1, p.dashPower)],
+    ['shoot', p.shootW], ['shield', p.shieldW], ['blink', p.blinkW],
+  ];
+  const on = parts.filter(([, v]) => v > 0.05);
+  if (!on.length) return 'does nothing';
+  return on.map(([n, v]) => (v > 0.95 ? n : `${n} ${pct(v)}`)).join(' + ');
 }

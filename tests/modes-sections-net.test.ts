@@ -1,3 +1,4 @@
+import { NoiseFieldRules } from '../src/rules/field/NoiseFieldRules';
 import { describe, expect, it } from 'vitest';
 import { applyCommand, captureState, restoreState, stateHash, type AppCommand, type AppState, type SaveData } from '../src/app/commands';
 import { CATALOG, RULE_IDS } from '../src/contracts/catalog';
@@ -53,7 +54,7 @@ class Idle implements PlayerSystem {
 
 describe('section overrides', () => {
   const game = () => {
-    const g = new Game({ rules: new SeededRandomRules(), seeds: new SeedModes(2), players: new Idle(), worldSeed: 2 });
+    const g = new Game({ field: new NoiseFieldRules(7), rules: new SeededRandomRules(), seeds: new SeedModes(2), players: new Idle(), worldSeed: 2 });
     g.step();
     return g;
   };
@@ -107,8 +108,9 @@ function makePeer(seed: number, worldSeed: number, connect: (hooks: NetHooks) =>
   const seeds = new SeedModes(worldSeed);
   seeds.timer.periodTicks = 150;
   const sw = new PlayerSwitch(new Idle());
-  const game = new Game({ rules: new SeededRandomRules(), seeds, players: sw, worldSeed });
-  const state: AppState = { game, seeds, worldSeed };
+  const field = new NoiseFieldRules(worldSeed);
+  const game = new Game({ field, rules: new SeededRandomRules(), seeds, players: sw, worldSeed });
+  const state: AppState = { game, seeds, field, worldSeed };
   const hooks: NetHooks = {
     tick: () => game.world.tick,
     snapshot: () => captureState(state, []),
@@ -162,7 +164,8 @@ describe('P2P lockstep', () => {
     }
 
     // Force a desync on client A; the periodic hash check must repair it.
-    a.game.world.players[0].x += 37;
+    // (A wallet change persists; a nudge in position could be clamped away by a wall.)
+    a.game.world.players[0].wallet += 5;
     for (let r = 0; r < 400; r++) round();
     expect(a.net.desyncs).toBe(1);
 

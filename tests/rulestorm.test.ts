@@ -1,3 +1,4 @@
+import { NoiseFieldRules } from '../src/rules/field/NoiseFieldRules';
 import { describe, expect, it } from 'vitest';
 import { CATALOG, emptyRuleState, RULE_IDS, type RuleId, type RuleState } from '../src/contracts/catalog';
 import type { Intent, PlayerId, PlayerInfo, PlayerSystem } from '../src/contracts/players';
@@ -85,6 +86,7 @@ describe('SeededRandomRules', () => {
 describe('Game simulation', () => {
   const run = (ticks: number, seed = 42) => {
     const game = new Game({
+      field: new NoiseFieldRules(seed),
       rules: new SeededRandomRules(),
       seeds: new TimedSeedSource(seed, 120), // change rules every 2s to exercise many sets
       players: new ScriptedPlayers(),
@@ -108,7 +110,7 @@ describe('Game simulation', () => {
     for (const id of RULE_IDS) {
       const st = emptyRuleState();
       st[id] = 1;
-      const game = new Game({ rules: new FixedRules(st), seeds: constantSeed, players: new ScriptedPlayers(), worldSeed: 7 });
+      const game = new Game({ field: new NoiseFieldRules(7), rules: new FixedRules(st), seeds: constantSeed, players: new ScriptedPlayers(), worldSeed: 7 });
       for (let i = 0; i < 400; i++) game.step();
       const w = game.world;
       for (const b of [...w.players, ...w.enemies, ...w.coins, ...w.bullets]) {
@@ -128,7 +130,7 @@ describe('Game simulation', () => {
   it('gets distinct rule effects from the same rule id regardless of generator', () => {
     const st = emptyRuleState();
     st['move.fast'] = 1;
-    const g = new Game({ rules: new FixedRules(st), seeds: constantSeed, players: new ScriptedPlayers(), worldSeed: 1 });
+    const g = new Game({ field: new NoiseFieldRules(7), rules: new FixedRules(st), seeds: constantSeed, players: new ScriptedPlayers(), worldSeed: 1 });
     g.step();
     expect(g.params.speed).toBeCloseTo(260 * 2.5);
   });

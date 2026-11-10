@@ -22,15 +22,12 @@ export function stepCoins(w: World, p: Params, dt: number, B: Bounds) {
     if (c.ttl <= 0) { c.dead = true; continue; }
 
     const body = { x: c.x, y: c.y, vx: c.vx, vy: c.vy, r: 8 };
-    if (p.coinBounce) {
-      if (Math.hypot(body.vx, body.vy) < 120) {
-        const a = w.rng.range(0, Math.PI * 2);
-        body.vx = Math.cos(a) * 220; body.vy = Math.sin(a) * 220;
-      }
-    } else {
-      const drag = Math.exp(-3 * dt);
-      body.vx *= drag; body.vy *= drag;
+    if (p.coinBounce > 0.05 && Math.hypot(body.vx, body.vy) < 120 * p.coinBounce) {
+      const a = w.rng.range(0, Math.PI * 2);
+      body.vx = Math.cos(a) * 220 * p.coinBounce; body.vy = Math.sin(a) * 220 * p.coinBounce;
     }
+    const drag = Math.exp(-3 * (1 - p.coinBounce) * dt);
+    body.vx *= drag; body.vy *= drag;
     if (p.coinPull !== 0) {
       const n = nearestPlayer(w, c.x, c.y);
       const range = p.coinPull > 0 ? 520 : 320;
@@ -47,9 +44,9 @@ export function stepCoins(w: World, p: Params, dt: number, B: Bounds) {
     limitSpeed(body, 900);
     body.x += body.vx * dt;
     body.y += body.vy * dt;
-    const bounce = p.coinBounce ? 1 : 0.6;
-    if (p.wallsSolid) collideWalls(w, body, bounce);
-    applyEdges(body, B, p.edges, bounce);
+    const bounce = 0.6 + 0.4 * p.coinBounce;
+    collideWalls(w, body, p, dt, bounce);
+    applyEdges(body, B, p.edgeWrap, bounce);
     c.x = body.x; c.y = body.y; c.vx = body.vx; c.vy = body.vy;
 
     if (inBlackHole(p, body)) { c.dead = true; continue; }
@@ -70,18 +67,19 @@ function collect(w: World, p: Params, pl: PlayerEnt, c: CoinEnt) {
   pl.comboT = 1.6;
   const mult = p.combo > 0 ? 1 + pl.combo * p.combo : 1;
   const value = p.coinValue * mult;
-  if (p.coinShared) for (const o of w.players) addScore(o, p, value);
-  else addScore(pl, p, value);
-  if (p.coinHeal) heal(pl, 15);
+  addScore(pl, p, value);
+  if (p.coinShare > 0) for (const o of w.players) if (o !== pl) addScore(o, p, value * p.coinShare);
+  if (p.coinHeal > 0) heal(pl, p.coinHeal);
+  pl.wallet++; // every coin is also a spendable resource
   emit(w, { type: 'pickup', x: c.x, y: c.y, color: value < 0 ? 0xba68c8 : 0xffd54f, value });
 
-  if (p.coinExplode) {
+  if (p.coinBlast > 0.05) {
     emit(w, { type: 'boom', x: c.x, y: c.y, color: 0xffab40 });
     const push = (b: { x: number; y: number; vx: number; vy: number }, s: number) => {
       const d = Math.hypot(b.x - c.x, b.y - c.y);
       if (d < 220 && d > 0.5) {
-        b.vx += ((b.x - c.x) / d) * 750 * s;
-        b.vy += ((b.y - c.y) / d) * 750 * s;
+        b.vx += ((b.x - c.x) / d) * 750 * s * p.coinBlast;
+        b.vy += ((b.y - c.y) / d) * 750 * s * p.coinBlast;
       }
     };
     for (const o of w.players) { push(o, 1); o.dashT = Math.max(o.dashT, 0.2); }

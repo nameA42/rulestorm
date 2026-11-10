@@ -4,7 +4,7 @@ import type { SectionMode } from '../game/Game';
 import type { NetInfo } from '../net/NetPlayers';
 import type { SaveMeta } from '../saves/SaveStore';
 
-export type SeedModeId = 'timer' | 'position' | 'both' | 'constant' | 'timerpos';
+export type SeedModeId = 'timer' | 'position' | 'both' | 'constant' | 'timerpos' | 'field';
 export type NetMode = 'offline' | 'hosting' | 'joining' | 'client';
 
 /**
@@ -41,10 +41,17 @@ export interface PanelHost {
     setTimerPaused(p: boolean): void;
     shareLink(): string;
   };
-  players: {
-    slots(): { id: string; name: string; joined: boolean; removable: boolean }[];
-    add(id: string): void;
-    remove(id: string): void;
+  field: {
+    getSource(): 'random' | 'image';
+    setSource(s: 'random' | 'image'): void;
+    hasImage(): boolean;
+    loadImage(file: File): Promise<string | null>; // error message or null
+    clearImage(): void;
+    getActivity(): number;
+    setActivity(v: number): void;
+    getWalk(): number;
+    setWalk(v: number): void;
+    dims(): number;
   };
   saves: {
     list(): SaveMeta[];

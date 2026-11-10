@@ -1,13 +1,16 @@
 import Phaser from 'phaser';
 import type { AppCommand } from './app/commands';
+import { fileToFieldImage } from './app/fieldImage';
 import { Session } from './app/Session';
 import type { PanelHost } from './debug/PanelHost';
 import { RulePanel } from './debug/RulePanel';
 import { Game } from './game/Game';
+import { FieldMap } from './game/view/FieldMap';
 import { GameScene } from './game/view/GameScene';
 import { KeyboardReader } from './players/KeyboardReader';
 import { LocalPlayers } from './players/LocalPlayers';
 import { PlayerSwitch } from './players/PlayerSwitch';
+import { NoiseFieldRules } from './rules/field/NoiseFieldRules';
 import { SeededRandomRules } from './rules/random/SeededRandomRules';
 import { SaveStore } from './saves/SaveStore';
 import { SEED_MODES, SeedModes, type SeedMode } from './seed/SeedModes';
@@ -23,17 +26,20 @@ import { hash32 } from './shared/rng';
 const url = new URL(location.href);
 const parseSeed = (s: string) => (/^\d+$/.test(s) ? Number(s) >>> 0 : hash32(s));
 const randomSeed = () => (Math.random() * 2 ** 32) >>> 0;
-const urlMode = url.searchParams.get('mode') as SeedMode | null;
+const urlMode = url.searchParams.get('mode') as SeedMode | 'field' | null;
 const roomParam = url.searchParams.get('room');
 
 const baseSeed = url.searchParams.has('seed') ? parseSeed(url.searchParams.get('seed')!) : randomSeed();
-const seeds = new SeedModes(baseSeed, urlMode && SEED_MODES.includes(urlMode) ? urlMode : 'timer');
-const rules = new SeededRandomRules();
-const local = new LocalPlayers(window);
-const players = new PlayerSwitch(local); // local couch play ↔ P2P online
+const seeds = new SeedModes(baseSeed, urlMode && urlMode !== 'field' && SEED_MODES.includes(urlMode) ? urlMode : 'timer');
+const rules = new SeededRandomRules(); // discrete rules system: seed → rule set
+const field = new NoiseFieldRules(baseSeed, 8); // continuous rules system: 8-D noise field
+const keyboard = new KeyboardReader(window); // the one local player's keys
+const local = new LocalPlayers(keyboard);
+const players = new PlayerSwitch(local); // offline ↔ P2P online
 
-const game = new Game({ rules, seeds, players, worldSeed: baseSeed });
-const session = new Session(game, seeds, baseSeed, players, local, () => new KeyboardReader(window));
+const game = new Game({ rules, seeds, field, players, worldSeed: baseSeed });
+if (urlMode === 'field') game.setRuleMode('field');
+const session = new Session(game, seeds, field, baseSeed, players, local, () => keyboard);
 const dispatch = (c: AppCommand) => session.dispatch(c);
 
 // ── Phaser ────────────────────────────────────────────────────────────
@@ -71,6 +77,7 @@ function syncUrl() {
     u.searchParams.set('seed', String(seeds.baseSeed));
     if (seeds.mode === 'timer') u.searchParams.delete('mode');
     else u.searchParams.set('mode', seeds.mode);
+    if (game.ruleMode === 'field') u.searchParams.set('mode', 'field');
   }
   if (u.toString() !== location.href) history.replaceState(null, '', u);
 }
@@ -98,8 +105,12 @@ const app: PanelHost = {
     setBase: (input) => dispatch({ k: 'setBase', seed: parseSeed(input.trim()) }),
     randomize: () => dispatch({ k: 'setBase', seed: randomSeed() }),
     rerollNow: () => dispatch({ k: 'skip' }),
-    getMode: () => seeds.mode,
-    setMode: (mode) => dispatch({ k: 'setMode', mode }),
+    getMode: () => (game.ruleMode === 'field' ? 'field' : seeds.mode),
+    setMode: (mode) => {
+      if (mode === 'field') return dispatch({ k: 'ruleMode', mode: 'field' });
+      dispatch({ k: 'ruleMode', mode: 'seed' });
+      dispatch({ k: 'setMode', mode });
+    },
     getPeriodSec: () => seeds.timer.periodTicks / TICKS_PER_SECOND,
     setPeriodSec: (seconds) => dispatch({ k: 'setPeriod', seconds }),
     getZoneSize: () => seeds.position.cellSize,
@@ -110,12 +121,24 @@ const app: PanelHost = {
     setTimerPaused: (paused) => dispatch({ k: 'timerPaused', paused }),
     shareLink: () => location.href,
   },
-  players: {
-    slots: () => players.current === local
-      ? local.slots().map((s) => ({ id: s.id, name: s.name, joined: local.isJoined(s.id), removable: !s.autoJoin }))
-      : [],
-    add: (id) => { local.join(id); game.syncRoster(); },
-    remove: (id) => { local.leave(id); game.syncRoster(); },
+  field: {
+    getSource: () => field.source,
+    setSource: (source) => dispatch({ k: 'fieldSource', source }),
+    hasImage: () => field.hasImage(),
+    loadImage: async (file) => {
+      try {
+        dispatch({ k: 'fieldImage', image: await fileToFieldImage(file) });
+        return null;
+      } catch (e) {
+        return `Couldn't read that image: ${(e as Error).message ?? e}`;
+      }
+    },
+    clearImage: () => dispatch({ k: 'fieldImage', image: null }),
+    getActivity: () => field.activity,
+    setActivity: (value) => dispatch({ k: 'fieldActivity', value }),
+    getWalk: () => game.fieldWalk,
+    setWalk: (value) => dispatch({ k: 'fieldWalk', value }),
+    dims: () => field.dims,
   },
   saves: {
     list: () => store.list(),
@@ -144,6 +167,7 @@ const app: PanelHost = {
 };
 
 new RulePanel(document.getElementById('panel')!, game, app);
+const fieldMap = new FieldMap(host, game);
 
 if (roomParam) void session.join(roomParam);
 
@@ -157,10 +181,11 @@ window.addEventListener('keydown', (e) => {
     case 'KeyP': app.game.setPaused(!app.game.isPaused()); break;
     case 'KeyT': app.seed.setTimerPaused(!app.seed.isTimerPaused()); break;
     case 'KeyR': app.seed.randomize(); break;
+    case 'KeyM': fieldMap.toggle(); break;
     default: return;
   }
   e.preventDefault();
 });
 
 // Handy from the dev console.
-Object.assign(window, { game, seeds, session, getPhaser: () => phaser });
+Object.assign(window, { game, seeds, field, session, getPhaser: () => phaser });

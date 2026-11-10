@@ -1,3 +1,4 @@
+import { NoiseFieldRules } from '../src/rules/field/NoiseFieldRules';
 import { describe, expect, it } from 'vitest';
 import type { Intent, PlayerId, PlayerInfo, PlayerSystem } from '../src/contracts/players';
 import { Game } from '../src/game/Game';
@@ -85,7 +86,7 @@ describe('save / load', () => {
       const make = () => {
         const seeds = new SeedModes(77, mode);
         seeds.timer.periodTicks = 90;
-        return { seeds, game: new Game({ rules: new SeededRandomRules(), seeds, players: new Scripted(), worldSeed: 77 }) };
+        return { seeds, game: new Game({ field: new NoiseFieldRules(7), rules: new SeededRandomRules(), seeds, players: new Scripted(), worldSeed: 77 }) };
       };
       const a = make();
       for (let i = 0; i < 700; i++) a.game.step();
@@ -105,7 +106,7 @@ describe('save / load', () => {
 
   it('restart gives a fresh world', () => {
     const seeds = new SeedModes(3);
-    const g = new Game({ rules: new SeededRandomRules(), seeds, players: new Scripted(), worldSeed: 3 });
+    const g = new Game({ field: new NoiseFieldRules(7), rules: new SeededRandomRules(), seeds, players: new Scripted(), worldSeed: 3 });
     for (let i = 0; i < 300; i++) g.step();
     g.restart(3);
     seeds.reset();

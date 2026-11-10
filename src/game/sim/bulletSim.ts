@@ -2,7 +2,7 @@ import type { Params } from '../params';
 import type { BulletEnt, Bounds, World } from '../world';
 import { addScore, hurt } from './combat';
 import { shootEnemy } from './enemySim';
-import { collideWalls } from './physics';
+import { applyEdges, collideWalls } from './physics';
 
 function homeTarget(w: World, p: Params, b: BulletEnt): { x: number; y: number } | null {
   let best: { x: number; y: number } | null = null;
@@ -13,7 +13,7 @@ function homeTarget(w: World, p: Params, b: BulletEnt): { x: number; y: number }
   };
   if (b.owner === null) return null;
   for (const e of w.enemies) if (!e.dead) consider(e.x, e.y);
-  if (p.friendlyFire) for (const pl of w.players) if (pl.alive && pl.id !== b.owner) consider(pl.x, pl.y);
+  if (p.friendlyFire > 0.05) for (const pl of w.players) if (pl.alive && pl.id !== b.owner) consider(pl.x, pl.y);
   return best;
 }
 
@@ -41,20 +41,15 @@ export function stepBullets(w: World, p: Params, dt: number, B: Bounds) {
     b.x += b.vx * dt;
     b.y += b.vy * dt;
 
-    if (p.wallsSolid && collideWalls(w, b, 1)) {
-      if (p.ricochet && b.bounces < 4) b.bounces++;
-      else { b.dead = true; continue; }
-    }
-    if (p.edges === 'wrap') {
-      const W = B.x1 - B.x0, H = B.y1 - B.y0;
-      if (b.x < B.x0) b.x += W; else if (b.x > B.x1) b.x -= W;
-      if (b.y < B.y0) b.y += H; else if (b.y > B.y1) b.y -= H;
-    } else if (b.x < B.x0 || b.x > B.x1 || b.y < B.y0 || b.y > B.y1) {
-      if (p.ricochet && b.bounces < 4) {
-        b.bounces++;
-        if (b.x < B.x0 || b.x > B.x1) { b.vx = -b.vx; b.x = Math.max(B.x0, Math.min(B.x1, b.x)); }
-        if (b.y < B.y0 || b.y > B.y1) { b.vy = -b.vy; b.y = Math.max(B.y0, Math.min(B.y1, b.y)); }
-      } else { b.dead = true; continue; }
+    // Walls and solid edges: ricochet keeps `ricochet` of the speed; slow shots die.
+    const hitWall = collideWalls(w, b, p, dt, p.ricochet) && p.wallSolid >= 0.97; // soft walls only drag
+    const hitEdge = applyEdges(b, B, p.edgeWrap, p.ricochet);
+    if (hitWall || hitEdge) {
+      b.bounces++;
+      if (p.ricochet < 0.05 || b.bounces > 4 || Math.hypot(b.vx, b.vy) < 200) { b.dead = true; continue; }
+    } else if (p.wallSolid < 0.97 && Math.hypot(b.vx, b.vy) < 150) {
+      b.dead = true; // stalled inside a soft wall
+      continue;
     }
 
     if (b.owner !== null) {
@@ -67,10 +62,10 @@ export function stepBullets(w: World, p: Params, dt: number, B: Bounds) {
         break;
       }
       if (b.dead) continue;
-      if (p.friendlyFire) {
+      if (p.friendlyFire > 0.05) {
         for (const pl of w.players) {
           if (!pl.alive || pl.id === b.owner || Math.hypot(pl.x - b.x, pl.y - b.y) > pl.r + b.r) continue;
-          if (hurt(w, p, pl, 14, 0.25)) {
+          if (hurt(w, p, pl, 14 * p.friendlyFire, 0.25)) {
             pl.vx += b.vx * 0.4 * p.bulletSize; pl.vy += b.vy * 0.4 * p.bulletSize;
             pl.dashT = Math.max(pl.dashT, 0.1);
           }

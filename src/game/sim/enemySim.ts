@@ -18,7 +18,7 @@ export function nearestPlayer(w: World, x: number, y: number): { pl: PlayerEnt; 
 export function spawnEnemy(w: World, x: number, y: number, scale = 1): EnemyEnt {
   const e: EnemyEnt = {
     id: w.nextId++, x, y, vx: 0, vy: 0, r: 15 * scale, scale,
-    wander: w.rng.range(0, Math.PI * 2), shootCd: w.rng.range(0.5, 2), portalCd: 0, dead: false,
+    wander: w.rng.range(0, Math.PI * 2), shootCd: w.rng.range(0.5, 2), portalCd: 0, bitten: 0, dead: false,
   };
   w.enemies.push(e);
   return e;
@@ -26,7 +26,7 @@ export function spawnEnemy(w: World, x: number, y: number, scale = 1): EnemyEnt 
 
 function manageCount(w: World, p: Params, dt: number, B: Bounds) {
   const target = Math.round(p.enemyCount);
-  const cap = p.enemyBreed > 0 ? Math.max(target, HARD_CAP) : target;
+  const cap = p.enemyBreed > 0.002 ? Math.max(target, HARD_CAP) : target;
   w.enemySpawnCd -= dt;
   if (w.enemySpawnCd > 0) return;
   if (w.enemies.length < target) {
@@ -35,7 +35,6 @@ function manageCount(w: World, p: Params, dt: number, B: Bounds) {
     emit(w, { type: 'spawn', x: s.x, y: s.y, color: 0xef5350 });
     w.enemySpawnCd = 0.5;
   } else if (w.enemies.length > cap) {
-    // Remove the one furthest from any player.
     let far: EnemyEnt | null = null;
     let fd = -1;
     for (const e of w.enemies) {
@@ -59,38 +58,32 @@ export function stepEnemies(w: World, p: Params, dt: number, B: Bounds) {
     e.portalCd -= dt;
     const speed = 115 * p.enemySpeed;
     e.wander += (w.rng.next() - 0.5) * 5 * dt;
-    let wx = Math.cos(e.wander), wy = Math.sin(e.wander);
+    const wx = Math.cos(e.wander), wy = Math.sin(e.wander);
     const near = nearestPlayer(w, e.x, e.y);
 
-    let tx = wx * speed * 0.7, ty = wy * speed * 0.7;
+    // Blend behaviours by weight; plain wandering fills whatever is left.
+    const wanderW = Math.max(0, 1 - (p.huntW + p.fleeW + p.orbitW + p.mimicW));
+    let tx = wx * speed * 0.7 * wanderW, ty = wy * speed * 0.7 * wanderW;
+    let total = wanderW;
     if (near) {
       const d = Math.max(near.dist, 1);
       const ux = (near.pl.x - e.x) / d, uy = (near.pl.y - e.y) / d;
-      switch (p.enemyAI) {
-        case 'hunt': {
-          const h = 0.35 + 0.65 * p.huntStrength;
-          let mx = wx * (1 - h) + ux * h, my = wy * (1 - h) + uy * h;
-          const m = Math.hypot(mx, my) || 1;
-          tx = (mx / m) * speed; ty = (my / m) * speed;
-          break;
-        }
-        case 'flee':
-          if (d < 450) { tx = -ux * speed * 1.15; ty = -uy * speed * 1.15; }
-          break;
-        case 'orbit': {
-          const radial = clamp((d - 150) / 100, -1, 1);
-          let mx = -uy + ux * radial, my = ux + uy * radial;
-          const m = Math.hypot(mx, my) || 1;
-          tx = (mx / m) * speed * 1.4; ty = (my / m) * speed * 1.4;
-          break;
-        }
-        case 'mimic':
-          if (leader) { tx = leader.lastIntent.x * speed * 1.4; ty = leader.lastIntent.y * speed * 1.4; }
-          break;
-        case 'wander':
-          break;
+      if (p.huntW > 0) { tx += ux * speed * p.huntW; ty += uy * speed * p.huntW; total += p.huntW; }
+      if (p.fleeW > 0) {
+        const f = d < 450 ? 1.15 : 0;
+        tx -= ux * speed * f * p.fleeW; ty -= uy * speed * f * p.fleeW; total += p.fleeW;
+      }
+      if (p.orbitW > 0) {
+        const radial = clamp((d - 150) / 100, -1, 1);
+        const mx = -uy + ux * radial, my = ux + uy * radial;
+        const m = Math.hypot(mx, my) || 1;
+        tx += (mx / m) * speed * 1.4 * p.orbitW; ty += (my / m) * speed * 1.4 * p.orbitW; total += p.orbitW;
       }
     }
+    if (p.mimicW > 0 && leader) {
+      tx += leader.lastIntent.x * speed * 1.4 * p.mimicW; ty += leader.lastIntent.y * speed * 1.4 * p.mimicW; total += p.mimicW;
+    }
+    if (total > 1) { tx /= total; ty /= total; }
 
     const k = 1 - Math.exp(-4 * dt);
     e.vx += (tx - e.vx) * k;
@@ -100,8 +93,8 @@ export function stepEnemies(w: World, p: Params, dt: number, B: Bounds) {
     e.x += e.vx * dt;
     e.y += e.vy * dt;
 
-    if (p.wallsSolid && collideWalls(w, e, 0.5)) e.wander = Math.atan2(e.vy, e.vx);
-    if (applyEdges(e, B, p.edges, 0.8)) e.wander = Math.atan2(e.vy, e.vx);
+    if (collideWalls(w, e, p, dt, 0.5)) e.wander = Math.atan2(e.vy, e.vx);
+    if (applyEdges(e, B, p.edgeWrap, 0.8)) e.wander = Math.atan2(e.vy, e.vx);
 
     if (inBlackHole(p, e)) {
       emit(w, { type: 'kill', x: e.x, y: e.y, color: 0x000000 });
@@ -109,10 +102,11 @@ export function stepEnemies(w: World, p: Params, dt: number, B: Bounds) {
       continue;
     }
 
-    if (p.portals && e.portalCd <= 0) {
+    if (p.portalSize > 0.05 && e.portalCd <= 0) {
+      const reach = 30 * p.portalSize;
       for (const pair of w.portals) {
-        const from = Math.hypot(e.x - pair.a.x, e.y - pair.a.y) < 28 ? pair.a
-          : Math.hypot(e.x - pair.b.x, e.y - pair.b.y) < 28 ? pair.b : null;
+        const from = Math.hypot(e.x - pair.a.x, e.y - pair.a.y) < reach ? pair.a
+          : Math.hypot(e.x - pair.b.x, e.y - pair.b.y) < reach ? pair.b : null;
         if (!from) continue;
         const to = from === pair.a ? pair.b : pair.a;
         e.x = to.x; e.y = to.y; e.portalCd = 1.2;
@@ -120,7 +114,7 @@ export function stepEnemies(w: World, p: Params, dt: number, B: Bounds) {
       }
     }
 
-    if (p.enemyShoot > 0 && near && near.dist < 650) {
+    if (p.enemyShoot > 0.02 && near && near.dist < 650) {
       e.shootCd -= dt;
       if (e.shootCd <= 0 && w.bullets.length < 300) {
         const d = Math.max(near.dist, 1);
@@ -144,9 +138,9 @@ export function stepEnemies(w: World, p: Params, dt: number, B: Bounds) {
       }
     }
 
-    if (p.enemyThieves) {
+    if (p.thieves > 0) {
       for (const c of w.coins) {
-        if (!c.dead && Math.hypot(c.x - e.x, c.y - e.y) < e.r + 8) {
+        if (!c.dead && Math.hypot(c.x - e.x, c.y - e.y) < e.r + 8 && w.rng.chance(Math.min(1, p.thieves * 8 * dt))) {
           c.dead = true;
           emit(w, { type: 'steal', x: c.x, y: c.y, color: 0xef5350 });
         }
@@ -165,11 +159,11 @@ export function stepEnemies(w: World, p: Params, dt: number, B: Bounds) {
   w.enemies = w.enemies.filter((e) => !e.dead);
 }
 
-/** Kill an enemy (shot); may split it. Returns true if it died. */
+/** Kill an enemy (shot); it may split. */
 export function shootEnemy(w: World, p: Params, e: EnemyEnt) {
   e.dead = true;
   emit(w, { type: 'kill', x: e.x, y: e.y, color: 0xef5350 });
-  if (p.enemySplit && e.scale > 0.45) {
+  if (p.splitChance > 0 && e.scale > 0.45 && w.rng.chance(p.splitChance)) {
     const a = Math.atan2(e.vy, e.vx) + Math.PI / 2;
     for (const s of [1, -1]) {
       const c = spawnEnemy(w, e.x + Math.cos(a) * s * 10, e.y + Math.sin(a) * s * 10, e.scale * 0.65);

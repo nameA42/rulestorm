@@ -4,6 +4,7 @@ import { hostRoom, joinRoom } from '../net/peerTransport';
 import type { InputSource } from '../players/KeyboardReader';
 import type { LocalPlayers } from '../players/LocalPlayers';
 import type { PlayerSwitch } from '../players/PlayerSwitch';
+import type { NoiseFieldRules } from '../rules/field/NoiseFieldRules';
 import type { SeedModes } from '../seed/SeedModes';
 import { applyCommand, captureState, restoreState, stateHash, type AppCommand, type AppState, type SaveData } from './commands';
 
@@ -24,6 +25,7 @@ export class Session implements AppState {
   constructor(
     readonly game: Game,
     readonly seeds: SeedModes,
+    readonly field: NoiseFieldRules,
     public worldSeed: number,
     private players: PlayerSwitch,
     private local: LocalPlayers,
@@ -37,10 +39,9 @@ export class Session implements AppState {
       return;
     }
     applyCommand(this, cmd);
-    if (cmd.k === 'load') this.local.setJoined(cmd.data.players);
     // Instant feedback even while paused.
     this.game.syncRoster();
-    this.game.refreshSeed();
+    this.game.refreshRules();
   }
 
   capture(): SaveData {
@@ -79,7 +80,7 @@ export class Session implements AppState {
       this.net = net;
       this.room = h.room;
       this.players.current = net;
-      this.teardown = () => { net.close(); h.destroy(); input.dispose?.(); };
+      this.teardown = () => { net.close(); h.destroy(); };
       this.changed();
     } catch (e) {
       this.mode = 'offline';
@@ -108,7 +109,7 @@ export class Session implements AppState {
       this.net = net;
       this.mode = 'client';
       this.players.current = net;
-      this.teardown = () => { net.close(); j.destroy(); input.dispose?.(); };
+      this.teardown = () => { net.close(); j.destroy(); };
       this.changed();
     } catch (e) {
       this.mode = 'offline';
@@ -127,8 +128,6 @@ export class Session implements AppState {
     this.mode = 'offline';
     this.players.current = this.local;
     t?.();
-    // Arrow keys pressed while online would have auto-joined a local P2.
-    this.local.setJoined(['p1']);
     this.game.syncRoster();
     this.changed();
   }

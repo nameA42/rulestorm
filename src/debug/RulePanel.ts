@@ -14,6 +14,7 @@ const MODE_ROWS: Record<SeedModeId, { timer: boolean; zone: boolean; precision: 
   both: { timer: true, zone: true, precision: false },
   constant: { timer: false, zone: false, precision: true },
   timerpos: { timer: true, zone: false, precision: true },
+  field: { timer: false, zone: false, precision: false },
 };
 
 interface Row { el: HTMLElement; fill: HTMLElement; marker: HTMLElement; btn: HTMLButtonElement; slider: HTMLInputElement; val: HTMLElement }
@@ -28,7 +29,6 @@ export class RulePanel {
   private filter = '';
   private activeOnly = false;
   private el: Record<string, HTMLElement> = {};
-  private playersSig = '';
   private rosterSig = '';
   private flashT = 0;
 
@@ -59,6 +59,26 @@ export class RulePanel {
             <button data-mode="both" title="Zone changes and the timer">Zones+Timer</button>
             <button data-mode="constant" title="Constant position: the players' exact positions pick the rules every tick. Stand still to keep them.">Live pos</button>
             <button data-mode="timerpos" title="Timer position: the players' exact positions are sampled each time the timer rolls over">Timed pos</button>
+            <button data-mode="field" class="fieldBtn" title="Rules are an n-dimensional field of smooth noise. Walking and exploring (arrow keys) move you through it, so rules change gradually.">✦ Noise field</button>
+          </div>
+          <div id="fieldBox" class="fieldbox">
+            <div class="row">
+              <span class="lbl">Noise</span>
+              <div class="seg seg2" id="fsrc">
+                <button data-src="random" title="Random smooth waves from the seed">Random</button>
+                <button data-src="image" title="Sample the field off a picture">Image</button>
+              </div>
+              <label class="filebtn" title="Use a picture: bright/dark regions become rule regions">📷 Load image…<input id="imgIn" type="file" accept="image/*"></label>
+              <button id="imgClear" title="Back to the placeholder picture">✕</button>
+            </div>
+            <div class="row"><span id="imgState" class="muted"></span></div>
+            <div class="row">
+              <label title="How many rules are on at once">Activity <input id="activity" type="range" min="0" max="100" step="1"> <span id="activityv" class="num"></span></label>
+            </div>
+            <div class="row">
+              <label title="How far walking across the arena moves you through the field (0 = only the arrow keys move you)">Walk <input id="walk" type="range" min="0" max="10" step="0.5"> <span id="walkv" class="num"></span></label>
+            </div>
+            <div class="row muted small">Arrows travel the field · Z/X, C/V switch map dims · Q spends a coin for influence, Shift+Q all · M shows/hides the map</div>
           </div>
           <div class="row" id="timerRow">
             <button id="timerToggle" title="Pause / resume the rule timer (T)"></button>
@@ -76,10 +96,6 @@ export class RulePanel {
             <button id="apply">Apply</button>
             <button id="copy" title="Copy a link that reproduces this seed + mode">Copy link</button>
           </div>
-        </div>
-
-        <div class="section">
-          <div class="row"><span class="lbl">Players</span><span id="players" class="players"></span></div>
         </div>
 
         <div class="section">
@@ -136,6 +152,25 @@ export class RulePanel {
     slider('period', 'periodv', 's', h.seed.getPeriodSec, h.seed.setPeriodSec);
     slider('zone', 'zonev', 'px', h.seed.getZoneSize, h.seed.setZoneSize);
     slider('precision', 'precisionv', 'px', h.seed.getPrecision, h.seed.setPrecision);
+    slider('walk', 'walkv', '', h.field.getWalk, h.field.setWalk);
+    const act = el.activity as HTMLInputElement;
+    act.value = String(Math.round(h.field.getActivity() * 100));
+    act.oninput = () => { el.activityv.textContent = `${act.value}%`; };
+    act.onchange = () => h.field.setActivity(Number(act.value) / 100);
+    for (const b of el.fsrc.querySelectorAll<HTMLButtonElement>('button')) {
+      b.onclick = () => h.field.setSource(b.dataset.src as 'random' | 'image');
+    }
+    const imgIn = el.imgIn as HTMLInputElement;
+    imgIn.onchange = async () => {
+      const f = imgIn.files?.[0];
+      if (!f) return;
+      el.imgState.textContent = 'loading…';
+      const err = await h.field.loadImage(f);
+      el.imgState.textContent = err ?? '';
+      el.imgState.dataset.auto = err ? '0' : '1';
+      imgIn.value = '';
+    };
+    el.imgClear.onclick = () => h.field.clearImage();
 
     const seedIn = el.seed as HTMLInputElement;
     const apply = () => { if (seedIn.value.trim()) { h.seed.setBase(seedIn.value); seedIn.blur(); } };
@@ -203,30 +238,6 @@ export class RulePanel {
     }
   }
 
-  private renderPlayers() {
-    const slots = this.host.players.slots();
-    const sig = slots.length ? slots.map((s) => `${s.id}:${s.joined}`).join('|') : 'online';
-    if (sig === this.playersSig) return;
-    this.playersSig = sig;
-    const box = this.el.players;
-    box.innerHTML = '';
-    if (!slots.length) {
-      box.innerHTML = '<span class="muted">online: one player per browser (WASD or arrows)</span>';
-      return;
-    }
-    for (const s of slots) {
-      const chip = document.createElement('span');
-      chip.className = `chip ${s.joined ? 'joined' : ''}`;
-      chip.textContent = s.name;
-      box.appendChild(chip);
-      if (!s.removable) continue;
-      const b = document.createElement('button');
-      b.textContent = s.joined ? `Remove ${s.name}` : `Add ${s.name}`;
-      b.onclick = () => (s.joined ? this.host.players.remove(s.id) : this.host.players.add(s.id));
-      box.appendChild(b);
-    }
-  }
-
   private renderNet() {
     const n = this.host.net;
     const mode = n.mode();
@@ -270,6 +281,8 @@ export class RulePanel {
     set('period', String(h.seed.getPeriodSec()));
     set('zone', String(h.seed.getZoneSize()));
     set('precision', String(h.seed.getPrecision()));
+    set('walk', String(h.field.getWalk()));
+    set('activity', String(Math.round(h.field.getActivity() * 100)));
   }
 
   private refresh() {
@@ -284,6 +297,7 @@ export class RulePanel {
     const mode = h.seed.getMode();
     for (const b of el.mode.querySelectorAll<HTMLButtonElement>('button')) b.classList.toggle('active', b.dataset.mode === mode);
     const rowsOn = MODE_ROWS[mode];
+    el.timerRow.style.display = mode === 'field' ? 'none' : '';
     el.timerRow.classList.toggle('disabled', !rowsOn.timer);
     el.zoneRow.style.display = rowsOn.zone ? '' : 'none';
     el.precisionRow.style.display = rowsOn.precision ? '' : 'none';
@@ -294,7 +308,15 @@ export class RulePanel {
     if (document.activeElement !== el.period) el.periodv.textContent = `${h.seed.getPeriodSec()}s`;
     if (document.activeElement !== el.zone) el.zonev.textContent = `${h.seed.getZoneSize()}px`;
     if (document.activeElement !== el.precision) el.precisionv.textContent = `${h.seed.getPrecision()}px`;
-    this.renderPlayers();
+    if (document.activeElement !== el.walk) el.walkv.textContent = h.field.getWalk() ? `${h.field.getWalk()}` : 'off';
+    if (document.activeElement !== el.activity) el.activityv.textContent = `${Math.round(h.field.getActivity() * 100)}%`;
+    el.fieldBox.style.display = mode === 'field' ? '' : 'none';
+    const src = h.field.getSource();
+    for (const b of el.fsrc.querySelectorAll<HTMLButtonElement>('button')) b.classList.toggle('active', b.dataset.src === src);
+    if (!el.imgState.textContent || el.imgState.dataset.auto === '1') {
+      el.imgState.dataset.auto = '1';
+      el.imgState.textContent = src === 'image' ? (h.field.hasImage() ? 'using your picture' : 'using a placeholder picture — load your own') : `${h.field.dims()}-dimensional random noise`;
+    }
     this.renderNet();
 
     if (this.flashT > 0) { this.flashT -= 0.15; if (this.flashT <= 0) el.saveMsg.textContent = ''; }
@@ -325,7 +347,7 @@ export class RulePanel {
       row.marker.style.left = `${target * 100}%`;
       row.val.textContent = v > 0.001 ? v.toFixed(2) : '';
       row.btn.textContent = ovr !== undefined ? (ovr > 0 ? 'ON' : 'OFF') : forced !== undefined ? (forced > 0 ? 'on' : 'off') : 'auto';
-      row.slider.disabled = def.kind === 'toggle' || ovr === 0;
+      row.slider.disabled = ovr === 0;
     }
     for (const hd of this.root.querySelectorAll<HTMLElement>('.rules h3')) {
       let n = hd.nextElementSibling as HTMLElement | null;
@@ -360,7 +382,6 @@ export class RulePanel {
       el.title = `${def.id}\n${def.desc}${'group' in def && def.group ? `\nexclusive group: ${def.group}` : ''}`;
       el.innerHTML = `
         <span class="name">${def.name}</span>
-        <span class="kind">${def.kind === 'toggle' ? 'T' : 'D'}</span>
         <span class="bar"><span class="fill"></span><span class="marker"></span></span>
         <span class="val"></span>
         <input class="slider" type="range" min="0" max="1" step="0.05" value="1">
@@ -376,12 +397,11 @@ export class RulePanel {
       const id = def.id as RuleId;
       row.btn.onclick = () => {
         const cur = this.game.overrides.get(id);
-        if (cur === undefined) this.host.rules.setOverride(id, def.kind === 'toggle' ? 1 : Number(row.slider.value));
+        if (cur === undefined) this.host.rules.setOverride(id, Number(row.slider.value));
         else if (cur > 0) this.host.rules.setOverride(id, 0);
         else this.host.rules.setOverride(id, null);
       };
       row.slider.onchange = () => this.host.rules.setOverride(id, Number(row.slider.value));
-      if (def.kind === 'toggle') row.slider.style.visibility = 'hidden'; // keep the grid cell
       list.appendChild(el);
       this.rows.set(id, row);
     }

@@ -1,10 +1,20 @@
 export type PlayerId = string;
 
-/** What a player wants to do this tick. Movement axes are in [-1, 1]. */
+/** What a player wants to do this tick. Axes are in [-1, 1]. */
 export interface Intent {
+  /** Move in the arena. */
   x: number;
   y: number;
   action: boolean;
+  /** Travel through the rule field along this player's two map dims. */
+  navX?: number;
+  navY?: number;
+  /** Cycle the map's dims: -1 previous, +1 next (one tick per key press). */
+  cycleX?: number;
+  cycleY?: number;
+  /** Spend one banked coin / all of them on influence (one tick per press). */
+  spend?: boolean;
+  spendAll?: boolean;
 }
 
 export const IDLE: Intent = Object.freeze({ x: 0, y: 0, action: false });

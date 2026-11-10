@@ -75,6 +75,7 @@ export class NetPlayers implements PlayerSystem {
 
   // client
   private hostLink: Link | null = null;
+  private readTick = -1;
   private frames = new Map<number, Frame>();
   private welcomed = false;
   private lastSent = -1;
@@ -147,7 +148,11 @@ export class NetPlayers implements PlayerSystem {
 
   // ── host ──────────────────────────────────────────────────────────
   private hostTick(T: number): ReadonlyMap<PlayerId, Intent> | null {
-    this.put(T + INPUT_DELAY, this.me!, this.input.read());
+    if (this.readTick !== T) {
+      // Sample once per tick: retries while waiting must not eat one-shot presses.
+      this.readTick = T;
+      this.put(T + INPUT_DELAY, this.me!, this.input.read());
+    }
 
     const inputs = new Map<PlayerId, Intent>();
     for (const p of this.rosterList) {
@@ -226,7 +231,7 @@ export class NetPlayers implements PlayerSystem {
   private put(tick: number, id: PlayerId, i: Intent) {
     let m = this.pending.get(tick);
     if (!m) this.pending.set(tick, (m = new Map()));
-    m.set(id, { x: i.x, y: i.y, action: i.action });
+    m.set(id, { ...i });
   }
 
   // ── client ────────────────────────────────────────────────────────

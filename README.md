@@ -9,10 +9,34 @@ npm run dev      # http://localhost:5180  (?seed=anything pins a seed, &mode=pos
 npm test         # determinism, all 100 rules smoke-tested, generator properties
 ```
 
-**Controls:** P1 uses WASD + Space. P2 uses the arrow keys + Enter (pressing any of them joins; the panel can remove them).
-P pauses the game, T pauses the rule timer, R randomizes (new seed, new rules now), and the backtick key (`` ` ``) toggles the panel.
+**Controls** (one player per browser; multiplayer is online-only):
+
+| Key | Does |
+|---|---|
+| WASD | move in the arena |
+| Space | action (dash / shot / shield / blink, blended by the rules) |
+| Arrows | travel through the rule field along your map's two dims |
+| Z / X | previous / next dim for the map's horizontal axis |
+| C / V | previous / next dim for the map's vertical axis (never the same as the other axis) |
+| Q / Shift+Q | spend one coin / all your coins on influence |
+| M | show / hide the field map |
+| P · T · R · `` ` `` | pause · pause rule timer · randomize · toggle panel |
+
+**Every rule is a degree.** All 100 rules take any strength from 0 to 1 and have a gradual effect. For example:
+- **Wraparound:** the centred stretch of each edge that wraps grows with strength.
+- **Mirror World:** the view turns like a page.
+- **The action modes** (dash, shoot, shield, blink) blend together by their weights.
+- **Enemy behaviours** (hunt, flee, orbit, mimic) mix together.
+- **Walls** soften until you can wade through them.
 
 **What makes the rules change** (panel → "Rules change by"):
+- **✦ Noise field** (gradual): the rules are an 8-dimensional field of smooth noise. Every point in that space is a rule set, and nearby points are similar, so moving changes the rules gradually rather than all at once.
+  - **Your position:** each player has their own position in the field. The arrow keys move you through it, and walking around the arena also nudges you along dims 0 and 1 (the *Walk* slider; 0 turns it off).
+  - **Shared rules:** the rules everyone plays under come from the players' average field position, weighted by influence.
+  - **Influence:** every coin you pick up goes into your wallet. Spending coins (Q, or Shift+Q for all) adds influence, which pulls the shared rules toward your spot. Influence halves every 15 seconds.
+  - **Noise source:** *Random* sums random plane waves. *Image* reads a picture you load: each rule looks at it through its own random projection from 8D to 2D, so bright and dark regions become rule regions.
+  - **Activity:** sets how many rules are on at once.
+  - **Field map** (bottom right): shows a 2D slice of the field through your position along your two chosen dims. Colour shows the rule category and brightness shows how much is active. Players are dots, and the dashed ring is the shared rule position. Hover to list the rules at any point.
 - **Timer:** a new rule set every N seconds. The timer can be paused or skipped.
 - **Zones:** the arena is cut into zones. The set of zones the players are standing in picks the rules, so stepping into a new zone changes them. There's a 28px margin, so standing on a boundary doesn't make the rules flicker. The occupied zones are highlighted.
 - **Zones+Timer:** a zone change *or* the timer changes the rules.
@@ -35,8 +59,9 @@ src/contracts/        ← the only things systems share
   players.ts          PlayerSystem:   roster() + inputsFor(tick)
   seed.ts             SeedSource:     SeedContext{tick, player positions} → seed
 
-src/rules/            RULES SYSTEM   – SeededRandomRules (swap for a grammar)
-src/players/          PLAYER SYSTEM  – LocalPlayers (couch), PlayerSwitch (local ↔ online)
+src/rules/            RULES SYSTEMS  – random/SeededRandomRules (RuleGenerator: seed → rules)
+                                       field/NoiseFieldRules (RuleField: n-dim point → rules)
+src/players/          PLAYER SYSTEM  – LocalPlayers (one player), PlayerSwitch (local ↔ online)
 src/net/              PLAYER SYSTEM  – NetPlayers: P2P lockstep over WebRTC (PeerJS)
 src/app/              commands.ts (every shared-state change) + Session (offline/host/client)
 src/seed/             SEED SOURCE    – SeedModes: timer | zones | both | constant | timerpos

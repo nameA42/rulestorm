@@ -13,7 +13,7 @@
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.35 system-ui, sans-serif; overflow: hidden; }
 #app { display: flex; height: 100vh; }
 #game { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
-#game canvas { display: block; position: absolute; inset: 0; }
+#game > canvas { display: block; position: absolute; inset: 0; }
 #panel { width: 380px; flex: none; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 body.panel-hidden #panel { display: none; }
 
@@ -35,7 +35,7 @@ body.panel-hidden #panel { display: none; }
 #panel .rules { overflow-y: auto; padding: 4px 8px 16px; flex: 1; }
 #panel h3 { margin: 12px 6px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
 #panel .rule {
-  display: grid; grid-template-columns: 1fr 14px 70px 30px 56px 44px; gap: 6px; align-items: center;
+  display: grid; grid-template-columns: 1fr 70px 30px 56px 44px; gap: 6px; align-items: center;
   padding: 3px 6px; border-radius: 4px; color: var(--muted);
 }
 #panel .rule:hover { background: #141927; }
@@ -73,7 +73,7 @@ body.panel-hidden #panel { display: none; }
 #panel button.active { background: #4a3413; border-color: var(--forced); color: #ffe0b2; }
 #panel button.danger:hover { border-color: #ef5350; color: #ef9a9a; }
 #panel .row.disabled { opacity: 0.4; }
-#panel .seg { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid #2a3348; border-radius: 5px; overflow: hidden; }
+#panel .seg { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #2a3348; border-radius: 5px; overflow: hidden; }
 #panel .seg button { border: 0; border-radius: 0; border-right: 1px solid #2a3348; padding: 4px 2px; font-size: 12px; }
 #panel .seg button:last-child { border-right: 0; }
 #panel .rules h3 { display: flex; align-items: center; justify-content: space-between; }
@@ -93,3 +93,30 @@ body.panel-hidden #panel { display: none; }
 #panel .saves li { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; }
 #panel .sname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 #panel .sname b { color: var(--text); font-weight: 600; margin-right: 4px; }
+
+/* ── noise field ────────────────────────────────────────────────── */
+#panel .seg button { border-bottom: 1px solid #2a3348; }
+#panel .seg button.fieldBtn { grid-column: span 3; }
+#panel .seg.seg2 { grid-template-columns: repeat(2, 1fr); }
+#panel .seg.seg2 button { border-bottom: 0; padding: 3px 10px; }
+#panel .fieldbox { display: grid; gap: 6px; padding: 8px; border: 1px solid #2c3a5e; border-radius: 6px; background: #0b1020; }
+#panel .filebtn { cursor: pointer; background: #18202f; border: 1px solid #2a3348; border-radius: 4px; padding: 3px 8px; color: var(--text) !important; }
+#panel .filebtn input { display: none; }
+#panel .small { font-size: 11px; }
+
+.fieldmap {
+  position: absolute; right: 12px; bottom: 44px; width: 236px; padding: 8px;
+  background: rgba(8, 10, 18, 0.88); border: 1px solid #2c3a5e; border-radius: 8px;
+  font: 11px/1.3 ui-monospace, Consolas, monospace; color: #c5cde0; z-index: 5;
+}
+.fieldmap canvas { display: block; width: 220px; height: 220px; border-radius: 4px; cursor: crosshair; image-rendering: auto; }
+.fieldmap .fm-title { margin-bottom: 6px; color: #e8ecf4; }
+.fieldmap .fm-legend { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 6px; }
+.fieldmap .fm-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; }
+.fieldmap .fm-help { margin-top: 4px; color: #7d879c; }
+.fieldmap .fm-tip {
+  display: none; position: absolute; pointer-events: none; min-width: 150px; padding: 6px 8px;
+  background: #0e1119; border: 1px solid #3a4560; border-radius: 5px; white-space: nowrap;
+}
+.fieldmap .fm-tip b { display: inline-block; width: 34px; color: #69f0ae; }
+.fieldmap .muted { color: #7d879c; }

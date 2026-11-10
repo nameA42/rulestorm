@@ -34,31 +34,57 @@ export function collideWall(b: Body, wall: Wall, bounce: number): boolean {
   return true;
 }
 
-export function collideWalls(w: World, b: Body, bounce: number): boolean {
+/** Overlap test without resolving. */
+export function touchesWall(b: Body, wall: Wall): boolean {
+  const cx = clamp(b.x, wall.x, wall.x + wall.w);
+  const cy = clamp(b.y, wall.y, wall.y + wall.h);
+  return (b.x - cx) ** 2 + (b.y - cy) ** 2 < b.r * b.r;
+}
+
+/**
+ * Walls with a solidity: fully solid walls block (and bounce); softer walls
+ * let you wade through, dragging on you the more solid they are.
+ * Returns true if the body touched any wall.
+ */
+export function collideWalls(w: World, b: Body, p: Params, dt: number, bounce: number): boolean {
   let hit = false;
-  for (const wall of w.walls) if (collideWall(b, wall, bounce)) hit = true;
+  for (const wall of w.walls) {
+    if (p.wallSolid >= 0.97) {
+      if (collideWall(b, wall, bounce)) hit = true;
+    } else if (p.wallSolid > 0.001 && touchesWall(b, wall)) {
+      const drag = Math.exp(-p.wallSolid * 14 * dt);
+      b.vx *= drag;
+      b.vy *= drag;
+      hit = true;
+    }
+  }
   return hit;
 }
 
-/** Keep a body inside the arena. Returns true if it touched an edge (never for wrap). */
-export function applyEdges(b: Body, B: Bounds, mode: Params['edges'], bounce: number): boolean {
-  if (mode === 'wrap') {
-    const W = B.x1 - B.x0, H = B.y1 - B.y0;
-    if (b.x < B.x0) b.x += W; else if (b.x > B.x1) b.x -= W;
-    if (b.y < B.y0) b.y += H; else if (b.y > B.y1) b.y -= H;
-    return false;
-  }
+/**
+ * Keep a body inside the arena. The centered `wrap` fraction of every edge is
+ * a wrap-around gap; elsewhere the edge is solid with `bounce` restitution.
+ * Returns true if the body touched a solid edge.
+ */
+export function applyEdges(b: Body, B: Bounds, wrap: number, bounce: number): boolean {
+  const W = B.x1 - B.x0, H = B.y1 - B.y0;
+  const gapY = Math.abs(b.y - (B.y0 + B.y1) / 2) < (wrap * H) / 2; // can cross left/right edges here
+  const gapX = Math.abs(b.x - (B.x0 + B.x1) / 2) < (wrap * W) / 2; // can cross top/bottom edges here
   let touched = false;
-  if (b.x - b.r < B.x0) { b.x = B.x0 + b.r; if (b.vx < 0) b.vx = -b.vx * bounce; touched = true; }
-  else if (b.x + b.r > B.x1) { b.x = B.x1 - b.r; if (b.vx > 0) b.vx = -b.vx * bounce; touched = true; }
-  if (b.y - b.r < B.y0) { b.y = B.y0 + b.r; if (b.vy < 0) b.vy = -b.vy * bounce; touched = true; }
-  else if (b.y + b.r > B.y1) { b.y = B.y1 - b.r; if (b.vy > 0) b.vy = -b.vy * bounce; touched = true; }
+  if (gapY && b.x < B.x0) b.x += W;
+  else if (gapY && b.x > B.x1) b.x -= W;
+  else if (!gapY && b.x - b.r < B.x0) { b.x = B.x0 + b.r; if (b.vx < 0) b.vx = -b.vx * bounce; touched = true; }
+  else if (!gapY && b.x + b.r > B.x1) { b.x = B.x1 - b.r; if (b.vx > 0) b.vx = -b.vx * bounce; touched = true; }
+  if (gapX && b.y < B.y0) b.y += H;
+  else if (gapX && b.y > B.y1) b.y -= H;
+  else if (!gapX && b.y - b.r < B.y0) { b.y = B.y0 + b.r; if (b.vy < 0) b.vy = -b.vy * bounce; touched = true; }
+  else if (!gapX && b.y + b.r > B.y1) { b.y = B.y1 - b.r; if (b.vy > 0) b.vy = -b.vy * bounce; touched = true; }
   return touched;
 }
 
-/** Bounce used for the arena edge by each edge mode. */
+/** Restitution of solid arena edges. */
 export function edgeBounce(p: Params): number {
-  return p.edges === 'bouncy' ? p.edgeBounce : p.edges === 'lava' ? 0.5 : 0;
+  return Math.min(1.3, p.edgeBounce);
 }
 
 /** Environmental forces shared by players, enemies and coins. */
@@ -88,7 +114,7 @@ export function windDir(time: number): { x: number; y: number } {
 }
 
 export function inBlackHole(p: Params, b: Body): boolean {
-  return p.blackHole > 0 && Math.hypot(b.x - CENTER.x, b.y - CENTER.y) < 22 + 14 * p.blackHole;
+  return p.blackHole > 0.05 && Math.hypot(b.x - CENTER.x, b.y - CENTER.y) < 36 * p.blackHole;
 }
 
 export function limitSpeed(b: Body, max: number) {
