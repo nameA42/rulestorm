@@ -64,9 +64,10 @@ export class RulePanel {
           <div id="fieldBox" class="fieldbox">
             <div class="row">
               <span class="lbl">Noise</span>
-              <div class="seg seg2" id="fsrc">
-                <button data-src="random" title="Random smooth waves from the seed">Random</button>
-                <button data-src="image" title="Sample the field off a picture">Image</button>
+              <div class="seg seg3" id="fsrc">
+                <button data-src="random" title="8-D field of random smooth waves from the seed">Random</button>
+                <button data-src="image" title="8-D field sampled off a picture">Image</button>
+                <button data-src="axes" title="Rotated rule space: 100 dimensions, one per rule. Field space is a random rotation of it, so each step nudges many rules at once.">Rule space</button>
               </div>
               <label class="filebtn" title="Use a picture: bright/dark regions become rule regions">📷 Load image…<input id="imgIn" type="file" accept="image/*"></label>
               <button id="imgClear" title="Back to the placeholder picture">✕</button>
@@ -78,7 +79,8 @@ export class RulePanel {
             <div class="row">
               <label title="How far walking across the arena moves you through the field (0 = only the arrow keys move you)">Walk <input id="walk" type="range" min="0" max="10" step="0.5"> <span id="walkv" class="num"></span></label>
             </div>
-            <div class="row muted small">Arrows travel the field · Z/X, C/V switch map dims · Q spends a coin for influence, Shift+Q all · M shows/hides the map</div>
+            <div class="row"><button id="straighten" title="Turn your map back to the field's own axes (O)">⟲ Straighten map</button><span class="muted small">⌖ on a rule turns your → axis toward it</span></div>
+            <div class="row muted small">Arrows travel · Shift+arrows turn the map toward the depth axis · , . spin · Z/X, C/V pick map axes · B/N pick depth axis · O straighten · Q spends a coin for influence, Shift+Q all · M shows/hides the map</div>
           </div>
           <div class="row" id="timerRow">
             <button id="timerToggle" title="Pause / resume the rule timer (T)"></button>
@@ -158,8 +160,9 @@ export class RulePanel {
     act.oninput = () => { el.activityv.textContent = `${act.value}%`; };
     act.onchange = () => h.field.setActivity(Number(act.value) / 100);
     for (const b of el.fsrc.querySelectorAll<HTMLButtonElement>('button')) {
-      b.onclick = () => h.field.setSource(b.dataset.src as 'random' | 'image');
+      b.onclick = () => h.field.setSource(b.dataset.src as 'random' | 'image' | 'axes');
     }
+    el.straighten.onclick = () => h.field.straighten();
     const imgIn = el.imgIn as HTMLInputElement;
     imgIn.onchange = async () => {
       const f = imgIn.files?.[0];
@@ -311,11 +314,14 @@ export class RulePanel {
     if (document.activeElement !== el.walk) el.walkv.textContent = h.field.getWalk() ? `${h.field.getWalk()}` : 'off';
     if (document.activeElement !== el.activity) el.activityv.textContent = `${Math.round(h.field.getActivity() * 100)}%`;
     el.fieldBox.style.display = mode === 'field' ? '' : 'none';
+    this.root.classList.toggle('fieldmode', mode === 'field');
     const src = h.field.getSource();
     for (const b of el.fsrc.querySelectorAll<HTMLButtonElement>('button')) b.classList.toggle('active', b.dataset.src === src);
     if (!el.imgState.textContent || el.imgState.dataset.auto === '1') {
       el.imgState.dataset.auto = '1';
-      el.imgState.textContent = src === 'image' ? (h.field.hasImage() ? 'using your picture' : 'using a placeholder picture — load your own') : `${h.field.dims()}-dimensional random noise`;
+      el.imgState.textContent = src === 'image' ? (h.field.hasImage() ? 'using your picture' : 'using a placeholder picture — load your own')
+        : src === 'axes' ? `${h.field.dims()}-D rule space (one axis per rule), seen through a random rotation`
+        : `${h.field.dims()}-dimensional random noise`;
     }
     this.renderNet();
 
@@ -385,7 +391,8 @@ export class RulePanel {
         <span class="bar"><span class="fill"></span><span class="marker"></span></span>
         <span class="val"></span>
         <input class="slider" type="range" min="0" max="1" step="0.05" value="1">
-        <button class="ovr">auto</button>`;
+        <button class="ovr">auto</button>
+        <button class="steer" title="Steer: turn your field map's → axis toward where this rule gets stronger, then travel with →">⌖</button>`;
       const row: Row = {
         el,
         fill: el.querySelector('.fill')!,
@@ -402,6 +409,7 @@ export class RulePanel {
         else this.host.rules.setOverride(id, null);
       };
       row.slider.onchange = () => this.host.rules.setOverride(id, Number(row.slider.value));
+      el.querySelector<HTMLButtonElement>('.steer')!.onclick = () => this.host.field.steer(id);
       list.appendChild(el);
       this.rows.set(id, row);
     }

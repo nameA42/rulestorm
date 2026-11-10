@@ -144,6 +144,8 @@ const app: PanelHost = {
     getWalk: () => game.fieldWalk,
     setWalk: (value) => dispatch({ k: 'fieldWalk', value }),
     dims: () => field.dims,
+    steer: (id) => keyboard.aim(id),
+    straighten: () => keyboard.straighten(),
   },
   saves: {
     list: () => store.list(),

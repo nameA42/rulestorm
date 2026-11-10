@@ -4,7 +4,7 @@ import type { RuleCategory, RuleField, RuleGenerator, Seed } from '../contracts/
 import type { SeedContext, SeedOverlay, SeedSource } from '../contracts/seed';
 import { Rng } from '../shared/rng';
 import { buildParams } from './effects';
-import { sharedFieldPos } from './field';
+import { playerFieldPos, ruleDirection, sharedFieldPos } from './field';
 import { defaultParams, type Params } from './params';
 import { stepWorld } from './sim/step';
 import { arenaBounds, createWorld, freeSpot, newPlayer, type World } from './world';
@@ -56,6 +56,7 @@ export interface RuleChange {
 
 const GROUP = new Map(CATALOG.map((r) => [r.id as RuleId, (r as { group?: string }).group]));
 const CATEGORY = new Map(CATALOG.map((r) => [r.id as RuleId, r.category as RuleCategory]));
+const INDEX = new Map(CATALOG.map((r, i) => [r.id as string, i]));
 
 /**
  * Orchestrator. Depends only on contracts (RuleGenerator, RuleField,
@@ -94,6 +95,7 @@ export class Game {
     if (!inputs) return false;
 
     this.syncRoster();
+    this.startAims(inputs);
     this.refreshRules();
     this.blend();
     stepWorld(this.world, this.params, inputs, DT);
@@ -102,6 +104,7 @@ export class Game {
 
   /** Re-read the active rules system. Runs every tick; safe to call while paused. */
   refreshRules() {
+    this.syncFieldDims();
     if (this.ruleMode === 'field') this.refreshField();
     else this.refreshSeed();
   }
@@ -213,6 +216,35 @@ export class Game {
       if (w.players.some((p) => p.id === info.id)) continue;
       const spot = freeSpot(w, 20, arenaBounds(this.params.arenaScale), [...w.enemies, ...w.players], 200);
       w.players.push(newPlayer(w, info, spot));
+    }
+  }
+
+  /** The field's dimension count can change (e.g. 8-D noise ↔ 100-D rule space): resize everyone. */
+  private syncFieldDims() {
+    const w = this.world;
+    const n = this.deps.field.dims;
+    if (w.fieldDims === n) return;
+    const resize = (v: readonly number[], pad: readonly number[]) => Array.from({ length: n }, (_, i) => v[i] ?? pad[i] ?? 0);
+    w.fieldOrigin = resize(w.fieldOrigin, []);
+    w.fieldDims = n;
+    for (const pl of w.players) {
+      pl.coord = resize(pl.coord, w.fieldOrigin);
+      pl.frame = null;
+      pl.aimDir = null;
+      if (pl.dimX >= n || pl.dimY >= n || pl.dimX === pl.dimY) { pl.dimX = 0; pl.dimY = Math.min(1, n - 1); }
+      pl.dimZ = Math.min(2, n - 1);
+    }
+    w.fieldCoord = sharedFieldPos(w, this.fieldWalk);
+  }
+
+  /** "Steer toward rule X": remember which way that rule gets stronger from where you are. */
+  private startAims(inputs: ReadonlyMap<string, { aim?: string }>) {
+    for (const [id, intent] of inputs) {
+      if (!intent.aim) continue;
+      const r = INDEX.get(intent.aim);
+      const pl = this.world.players.find((p) => p.id === id);
+      if (r === undefined || !pl || pl.coord.length !== this.world.fieldDims) continue;
+      pl.aimDir = ruleDirection(this.deps.field, r, playerFieldPos(pl, this.fieldWalk));
     }
   }
 

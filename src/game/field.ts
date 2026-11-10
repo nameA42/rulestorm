@@ -1,3 +1,4 @@
+import type { RuleField } from '../contracts/rules';
 import { CENTER, WORLD_W, type PlayerEnt, type World } from './world';
 
 /**
@@ -32,4 +33,27 @@ export function sharedFieldPos(w: World, walk: number): number[] {
     total += wt;
   }
   return out.map((v) => v / total);
+}
+
+/**
+ * The field direction that makes one rule stronger fastest, at coord
+ * (numerical gradient of the field's raw value). null if the field can't say
+ * or it's flat here.
+ */
+export function ruleDirection(field: RuleField, rule: number, coord: readonly number[], h = 0.1): number[] | null {
+  if (!field.values) return null;
+  const c = [...coord];
+  const g = new Array(c.length).fill(0);
+  let m = 0;
+  for (let i = 0; i < c.length; i++) {
+    c[i] = coord[i] + h;
+    const a = field.values(c)[rule];
+    c[i] = coord[i] - h;
+    const b = field.values(c)[rule];
+    c[i] = coord[i];
+    g[i] = (a - b) / (2 * h);
+    m += g[i] * g[i];
+  }
+  m = Math.sqrt(m);
+  return m > 1e-6 ? g.map((v) => v / m) : null;
 }

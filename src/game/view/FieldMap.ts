@@ -1,6 +1,7 @@
 import { CATALOG, RULE_IDS, type RuleId, type RuleState } from '../../contracts/catalog';
 import type { RuleCategory } from '../../contracts/rules';
 import { playerFieldPos } from '../field';
+import { axis, isTurned } from '../frame';
 import type { Game } from '../Game';
 
 const RES = 44; // samples per side
@@ -16,7 +17,8 @@ const NAME_OF = new Map<RuleId, string>(CATALOG.map((r) => [r.id as RuleId, r.na
 
 /**
  * The "field map": a 2D slice of the n-dimensional rule field through your
- * position, along the two dims you've picked (Z/X and C/V). Colour shows which
+ * position, along your two map axes (picked with Z/X and C/V, and turned with
+ * Shift+arrows / , .). Below it: which rules each axis pushes. Colour shows which
  * kinds of rules are strong there; brightness shows how much is going on.
  * Hover to see the rules at any point.
  */
@@ -30,6 +32,10 @@ export class FieldMap {
   private lastDraw = 0;
   private center: number[] = [];
   private dims: [number, number] = [0, 1];
+  /** Field directions of the map's → and ↓ axes. */
+  private U: number[] = [];
+  private V: number[] = [];
+  private pushes: HTMLDivElement;
   shown = true;
 
   constructor(host: HTMLElement, private game: Game) {
@@ -40,12 +46,14 @@ export class FieldMap {
       <canvas width="${SIZE}" height="${SIZE}"></canvas>
       <div class="fm-legend">${(Object.keys(CAT_COLOR) as RuleCategory[])
         .map((c) => `<span><i style="background:rgb(${CAT_COLOR[c].join(',')})"></i>${c}</span>`).join('')}</div>
-      <div class="fm-help">←↑↓→ travel · Z/X C/V switch dims · M hide</div>
+      <div class="fm-push"></div>
+      <div class="fm-help">←↑↓→ travel · Shift+arrows turn · , . spin<br>Z/X C/V axes · B/N depth · O straighten · M hide</div>
       <div class="fm-tip"></div>`;
     host.appendChild(this.root);
     this.canvas = this.root.querySelector('canvas')!;
     this.title = this.root.querySelector('.fm-title')!;
     this.tip = this.root.querySelector('.fm-tip')!;
+    this.pushes = this.root.querySelector('.fm-push')!;
     this.buf.width = RES;
     this.buf.height = RES;
     this.canvas.addEventListener('mousemove', (e) => this.hover(e));
@@ -74,28 +82,45 @@ export class FieldMap {
     this.center = me ? playerFieldPos(me, this.game.fieldWalk) : [...w.fieldCoord];
     this.dims = me ? [me.dimX, me.dimY] : [0, 1];
     const [dx, dy] = this.dims;
-    this.title.textContent = `Field map · ${field.dims}D · dim ${dx} → / dim ${dy} ↓`;
+    const n = this.center.length;
+    this.U = me ? axis(me, n, dx) : unit(n, 0);
+    this.V = me ? axis(me, n, dy) : unit(n, 1);
+    const turned = me && isTurned(me);
+    this.title.textContent = `Field map · ${field.dims}D · axis ${dx} → / ${dy} ↓ · depth ${me?.dimZ ?? 2}${turned ? ' · turned' : ''}${me?.aimDir ? ' · steering…' : ''}`;
 
     // Re-render the slice only when it changed (it's ~2k field samples).
-    const key = `${this.center.map((v) => v.toFixed(2)).join(',')}|${dx},${dy}|${field.describe?.() ?? ''}`;
+    const key = `${this.center.map((v) => v.toFixed(2)).join(',')}|${dx},${dy}|${sig(this.U)}|${sig(this.V)}|${field.describe?.() ?? ''}`;
     const now = performance.now();
     if (key !== this.lastKey && now - this.lastDraw > 60) {
       this.lastKey = key;
       this.lastDraw = now;
       this.renderSlice();
+      this.renderPushes();
     }
     this.drawMarkers();
   }
 
+  /** A point on the map: centre + a·→axis + b·↓axis (a, b in field units). */
+  private at(a: number, b: number): number[] {
+    return this.center.map((v, i) => v + a * this.U[i] + b * this.V[i]);
+  }
+
   private renderSlice() {
-    const [dx, dy] = this.dims;
     const ctx = this.buf.getContext('2d')!;
     const img = ctx.createImageData(RES, RES);
-    const c = [...this.center];
+    const field = this.game.deps.field;
+    if (field.sampleGrid) {
+      const grid = field.sampleGrid(this.center, this.U, this.V, RANGE, RES);
+      for (let k = 0; k < RES * RES; k++) {
+        const [r, g, b] = colorOfGrid(grid, k * RULE_IDS.length);
+        img.data[k * 4] = r; img.data[k * 4 + 1] = g; img.data[k * 4 + 2] = b; img.data[k * 4 + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      return;
+    }
     for (let j = 0; j < RES; j++) {
       for (let i = 0; i < RES; i++) {
-        c[dx] = this.center[dx] + ((i / (RES - 1)) * 2 - 1) * RANGE;
-        c[dy] = this.center[dy] + ((j / (RES - 1)) * 2 - 1) * RANGE;
+        const c = this.at(((i / (RES - 1)) * 2 - 1) * RANGE, ((j / (RES - 1)) * 2 - 1) * RANGE);
         const [r, g, b] = colorOf(this.game.deps.field.sample(c));
         const o = (j * RES + i) * 4;
         img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
@@ -104,11 +129,31 @@ export class FieldMap {
     ctx.putImageData(img, 0, 0);
   }
 
+  /** Which rules travelling along each map axis strengthens (+) or weakens (−) most. */
+  private renderPushes() {
+    const field = this.game.deps.field;
+    if (!field.values) { this.pushes.textContent = ''; return; }
+    const h = 0.15;
+    const line = (dir: number[], label: string) => {
+      const a = field.values!(this.center.map((v, i) => v + h * dir[i]));
+      const b = field.values!(this.center.map((v, i) => v - h * dir[i]));
+      const slopes = RULE_IDS.map((id, r) => ({ id, d: a[r] - b[r] }));
+      slopes.sort((x, y) => Math.abs(y.d) - Math.abs(x.d));
+      // Only rules this axis really moves (relative to the strongest one).
+      const top = slopes.slice(0, 3).filter((s) => Math.abs(s.d) > 0.2 * Math.abs(slopes[0].d) && Math.abs(s.d) > 1e-3);
+      return `<div><b>${label}</b> ${top.length ? '' : '<span class="muted">nothing much</span>'}${top.map((s) => `<span class="${s.d > 0 ? 'up' : 'down'}">${s.d > 0 ? '+' : '−'}${NAME_OF.get(s.id)}</span>`).join(' ')}</div>`;
+    };
+    this.pushes.innerHTML = line(this.U, '→') + line(this.V, '↓');
+  }
+
   private toPx(coord: readonly number[]): [number, number] {
-    const [dx, dy] = this.dims;
-    const u = ((coord[dx] - this.center[dx]) / RANGE + 1) / 2;
-    const v = ((coord[dy] - this.center[dy]) / RANGE + 1) / 2;
-    return [u * SIZE, v * SIZE];
+    let a = 0, b = 0;
+    for (let i = 0; i < this.center.length; i++) {
+      const d = (coord[i] ?? 0) - this.center[i];
+      a += d * this.U[i];
+      b += d * this.V[i];
+    }
+    return [((a / RANGE + 1) / 2) * SIZE, ((b / RANGE + 1) / 2) * SIZE];
   }
 
   private drawMarkers() {
@@ -146,10 +191,7 @@ export class FieldMap {
   private hover(e: MouseEvent) {
     const r = this.canvas.getBoundingClientRect();
     const u = (e.clientX - r.left) / r.width, v = (e.clientY - r.top) / r.height;
-    const [dx, dy] = this.dims;
-    const c = [...this.center];
-    c[dx] += (u * 2 - 1) * RANGE;
-    c[dy] += (v * 2 - 1) * RANGE;
+    const c = this.at((u * 2 - 1) * RANGE, (v * 2 - 1) * RANGE);
     const st = this.game.deps.field.sample(c);
     const top = RULE_IDS.filter((id) => st[id] > 0.02).sort((a, b) => st[b] - st[a]).slice(0, 7);
     this.tip.innerHTML = top.length
@@ -161,16 +203,36 @@ export class FieldMap {
   }
 }
 
+function unit(n: number, k: number): number[] {
+  const v = new Array(n).fill(0);
+  v[k] = 1;
+  return v;
+}
+
+/** Short fingerprint of a direction, for change detection. */
+function sig(v: readonly number[]): string {
+  let a = 0, b = 0;
+  for (let i = 0; i < v.length; i++) { a += v[i] * (i + 1); b += v[i] * ((i * 7919) % 101); }
+  return `${a.toFixed(4)},${b.toFixed(4)}`;
+}
+
 function clampPx(v: number) {
   return Math.max(4, Math.min(SIZE - 4, v));
 }
 
 function colorOf(st: RuleState): [number, number, number] {
+  return colorOfGrid(RULE_IDS.map((id) => st[id]), 0);
+}
+
+const CAT_RGB = RULE_IDS.map((id) => CAT_COLOR[CAT_OF.get(id)!]);
+
+/** Colour of one grid cell: strengths at vals[o .. o + rule count). */
+function colorOfGrid(vals: ArrayLike<number>, o: number): [number, number, number] {
   let r = 0, g = 0, b = 0, total = 0;
-  for (const id of RULE_IDS) {
-    const v = st[id];
+  for (let k = 0; k < CAT_RGB.length; k++) {
+    const v = vals[o + k];
     if (v <= 0) continue;
-    const c = CAT_COLOR[CAT_OF.get(id)!];
+    const c = CAT_RGB[k];
     r += c[0] * v; g += c[1] * v; b += c[2] * v; total += v;
   }
   if (total === 0) return [12, 14, 22];

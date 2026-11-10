@@ -1,4 +1,5 @@
 import { IDLE, type Intent, type PlayerId } from '../../contracts/players';
+import { turnPlane, turnToward } from '../frame';
 import type { Params } from '../params';
 import { emit, freeSpot, insideAnyWall, MAX_HP, partial, type Bounds, type PlayerEnt, type World } from '../world';
 import { addScore, fire, heal, hurt, respawn } from './combat';
@@ -89,19 +90,44 @@ function act(w: World, p: Params, pl: PlayerEnt, action: boolean, B: Bounds) {
   if (used) pl.actionCd = (0.8 + 1.7 * p.shieldW + 0.2 * p.blinkW) * p.cooldownMult;
 }
 
-/** Field exploration: arrows travel, dim keys re-slice the map, Q spends coins. */
+/**
+ * Field exploration: arrows travel along the map's axes, the axis keys
+ * re-slice the map, the turn keys rotate it, Q spends coins.
+ */
 function explore(w: World, pl: PlayerEnt, raw: Intent, dt: number) {
   const n = w.fieldDims;
   if (pl.coord.length !== n) pl.coord = [...w.fieldOrigin];
-  const cycle = (cur: number, other: number, dir: number) => {
+  if (pl.frame === undefined || (pl.frame && pl.frame.length !== n * n)) pl.frame = null;
+  if (pl.aimDir === undefined || (pl.aimDir && pl.aimDir.length !== n)) pl.aimDir = null;
+  if (typeof pl.dimZ !== 'number' || pl.dimZ >= n) pl.dimZ = 0;
+  const cycle = (cur: number, dir: number, ...avoid: number[]) => {
     let d = cur;
-    do d = (d + dir + n) % n; while (d === other && n > 1);
-    return d;
+    for (let i = 0; i < n; i++) {
+      d = (d + dir + n) % n;
+      if (!avoid.includes(d)) return d;
+    }
+    return cur;
   };
-  if (raw.cycleX) pl.dimX = cycle(pl.dimX, pl.dimY, Math.sign(raw.cycleX));
-  if (raw.cycleY) pl.dimY = cycle(pl.dimY, pl.dimX, Math.sign(raw.cycleY));
-  if (raw.navX) pl.coord[pl.dimX] += clamp(raw.navX, -1, 1) * NAV_SPEED * dt;
-  if (raw.navY) pl.coord[pl.dimY] += clamp(raw.navY, -1, 1) * NAV_SPEED * dt;
+  if (raw.cycleX) pl.dimX = cycle(pl.dimX, Math.sign(raw.cycleX), pl.dimY);
+  if (raw.cycleY) pl.dimY = cycle(pl.dimY, Math.sign(raw.cycleY), pl.dimX);
+  if (raw.cycleZ) pl.dimZ = cycle(pl.dimZ, Math.sign(raw.cycleZ), pl.dimX, pl.dimY);
+  // Depth must differ from both map axes (if there's room for a third axis).
+  if (n >= 3 && (pl.dimZ === pl.dimX || pl.dimZ === pl.dimY)) pl.dimZ = cycle(pl.dimZ, 1, pl.dimX, pl.dimY);
+
+  if (raw.resetTurn) { pl.frame = null; pl.aimDir = null; }
+  if (n >= 3 && raw.turnX) turnPlane(pl, n, pl.dimX, pl.dimZ, Math.sign(raw.turnX));
+  if (n >= 3 && raw.turnY) turnPlane(pl, n, pl.dimY, pl.dimZ, Math.sign(raw.turnY));
+  if (raw.spin) turnPlane(pl, n, pl.dimX, pl.dimY, Math.sign(raw.spin));
+  if (pl.aimDir && turnToward(pl, n, pl.dimX, pl.aimDir)) pl.aimDir = null;
+
+  const travel = (k: number, amount: number) => {
+    if (!amount) return;
+    const step = clamp(amount, -1, 1) * NAV_SPEED * dt;
+    if (!pl.frame) { pl.coord[k] += step; return; }
+    for (let i = 0; i < n; i++) pl.coord[i] += pl.frame[k * n + i] * step;
+  };
+  travel(pl.dimX, raw.navX ?? 0);
+  travel(pl.dimY, raw.navY ?? 0);
 
   if (raw.spendAll && pl.wallet > 0) {
     pl.influence += pl.wallet;

@@ -98,6 +98,11 @@ body.panel-hidden #panel { display: none; }
 #panel .seg button { border-bottom: 1px solid #2a3348; }
 #panel .seg button.fieldBtn { grid-column: span 3; }
 #panel .seg.seg2 { grid-template-columns: repeat(2, 1fr); }
+#panel .seg.seg3 { grid-template-columns: repeat(3, 1fr); }
+#panel .seg.seg3 button { border-bottom: 0; padding: 3px 8px; }
+#panel .rule .steer { display: none; padding: 1px 3px !important; font-size: 11px !important; }
+#panel.fieldmode .rule { grid-template-columns: 1fr 70px 30px 56px 44px 20px; }
+#panel.fieldmode .rule .steer { display: block; }
 #panel .seg.seg2 button { border-bottom: 0; padding: 3px 10px; }
 #panel .fieldbox { display: grid; gap: 6px; padding: 8px; border: 1px solid #2c3a5e; border-radius: 6px; background: #0b1020; }
 #panel .filebtn { cursor: pointer; background: #18202f; border: 1px solid #2a3348; border-radius: 4px; padding: 3px 8px; color: var(--text) !important; }
@@ -120,3 +125,8 @@ body.panel-hidden #panel { display: none; }
 }
 .fieldmap .fm-tip b { display: inline-block; width: 34px; color: #69f0ae; }
 .fieldmap .muted { color: #7d879c; }
+
+.fieldmap .fm-push { font-size: 10px; line-height: 1.5; color: #9aa6c4; }
+.fieldmap .fm-push b { display: inline-block; width: 12px; color: #fff; }
+.fieldmap .fm-push .up { color: #9be59f; }
+.fieldmap .fm-push .down { color: #ef9a9a; }

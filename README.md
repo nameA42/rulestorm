@@ -15,7 +15,12 @@ npm test         # determinism, all 100 rules smoke-tested, generator properties
 |---|---|
 | WASD | move in the arena |
 | Space | action (dash / shot / shield / blink, blended by the rules) |
-| Arrows | travel through the rule field along your map's two dims |
+| Arrows | travel through the rule field along your map's two axes |
+| Shift+Arrows | turn the map: tilt its → / ↓ axis toward the depth axis |
+| , / . | spin the map within its own plane |
+| B / N | previous / next depth axis |
+| O | straighten the map (undo all turning) |
+| ⌖ (panel, per rule) | steer: turn your → axis toward where that rule gets stronger |
 | Z / X | previous / next dim for the map's horizontal axis |
 | C / V | previous / next dim for the map's vertical axis (never the same as the other axis) |
 | Q / Shift+Q | spend one coin / all your coins on influence |
@@ -35,6 +40,8 @@ npm test         # determinism, all 100 rules smoke-tested, generator properties
   - **Shared rules:** the rules everyone plays under come from the players' average field position, weighted by influence.
   - **Influence:** every coin you pick up goes into your wallet. Spending coins (Q, or Shift+Q for all) adds influence, which pulls the shared rules toward your spot. Influence halves every 15 seconds.
   - **Noise source:** *Random* sums random plane waves. *Image* reads a picture you load: each rule looks at it through its own random projection from 8D to 2D, so bright and dark regions become rule regions.
+    *Rule space* is 100-dimensional, one axis per rule, and each axis carries its own 1-D noise, so a rule only cares how far along its own axis you are. The space you travel in (field space) is a seeded random rotation of rule space, so every arrow-key step is a diagonal that nudges many rules at once.
+  - **Turning:** each player has their own orientation in the field. Any n-D rotation is made of 2-D plane rotations, so the controls turn one plane at a time, and only planes you can see: the map's own plane (spin) and each map axis against a chosen *depth* axis (tilt). Cycling the axes reaches every plane, so a handful of keys covers any number of dimensions. For "I want *that* rule" there's steering (⌖ in the panel): your → axis swings smoothly to the direction that strengthens that rule fastest, and → then travels toward it. Under the map, *→* and *↓* list the rules each axis pushes most.
   - **Activity:** sets how many rules are on at once.
   - **Field map** (bottom right): shows a 2D slice of the field through your position along your two chosen dims. Colour shows the rule category and brightness shows how much is active. Players are dots, and the dashed ring is the shared rule position. Hover to list the rules at any point.
 - **Timer:** a new rule set every N seconds. The timer can be paused or skipped.

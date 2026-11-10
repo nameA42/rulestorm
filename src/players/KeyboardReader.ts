@@ -11,18 +11,24 @@ const GAME_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyQ',
+  'KeyB', 'KeyN', 'Comma', 'Period', 'KeyO',
+  'ShiftLeft', 'ShiftRight',
 ]);
 
 /**
  * The one local player:
  *   WASD move · Space action · arrows travel the rule field ·
  *   Z/X previous/next horizontal map dim · C/V previous/next vertical map dim ·
+ *   Shift+arrows turn the map (tilt toward / away from the depth axis) ·
+ *   , . spin the map · B/N previous/next depth axis · O straighten ·
  *   Q spend a coin · Shift+Q spend all coins.
  */
 export class KeyboardReader implements InputSource {
   private held = new Set<string>();
   /** One-shot presses waiting to be read (so quick taps are never lost). */
   private presses: string[] = [];
+  private pendingAim: string | null = null;
+  private pendingReset = false;
 
   constructor(private target: Window = window) {
     target.addEventListener('keydown', this.down);
@@ -30,20 +36,37 @@ export class KeyboardReader implements InputSource {
     target.addEventListener('blur', this.blur);
   }
 
+  /** Steer toward a rule (from the panel): goes out with the next read. */
+  aim(ruleId: string) { this.pendingAim = ruleId; }
+  /** Straighten the map (from the panel). */
+  straighten() { this.pendingReset = true; }
+
   read(): Intent {
     const k = (c: string) => this.held.has(c);
     const once = new Set(this.presses.splice(0));
-    return {
+    const shift = k('ShiftLeft') || k('ShiftRight');
+    const ax = (k('ArrowRight') ? 1 : 0) - (k('ArrowLeft') ? 1 : 0);
+    const ay = (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') ? 1 : 0);
+    const intent: Intent = {
       x: (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0),
       y: (k('KeyS') ? 1 : 0) - (k('KeyW') ? 1 : 0),
       action: k('Space') || once.has('Space'),
-      navX: (k('ArrowRight') ? 1 : 0) - (k('ArrowLeft') ? 1 : 0),
-      navY: (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') ? 1 : 0),
+      navX: shift ? 0 : ax,
+      navY: shift ? 0 : ay,
+      turnX: shift ? ax : 0,
+      turnY: shift ? ay : 0,
+      spin: (k('Period') ? 1 : 0) - (k('Comma') ? 1 : 0),
       cycleX: (once.has('KeyX') ? 1 : 0) - (once.has('KeyZ') ? 1 : 0),
       cycleY: (once.has('KeyV') ? 1 : 0) - (once.has('KeyC') ? 1 : 0),
+      cycleZ: (once.has('KeyN') ? 1 : 0) - (once.has('KeyB') ? 1 : 0),
+      resetTurn: once.has('KeyO') || this.pendingReset,
       spend: once.has('KeyQ'),
       spendAll: once.has('ShiftQ'),
     };
+    if (this.pendingAim) intent.aim = this.pendingAim;
+    this.pendingAim = null;
+    this.pendingReset = false;
+    return intent;
   }
 
   dispose() {

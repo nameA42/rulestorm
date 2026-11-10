@@ -9,7 +9,7 @@ export interface FieldImage {
   data: number[];
 }
 
-export type NoiseSource = 'random' | 'image';
+export type NoiseSource = 'random' | 'image' | 'axes';
 
 interface FieldState {
   seed: number;
@@ -20,6 +20,8 @@ interface FieldState {
 
 const IDS: readonly RuleId[] = CATALOG.map((r) => r.id);
 const WAVES = 5;
+/** Rotated-rule-space mode: 1-D waves per rule axis. */
+const AXIS_WAVES = 3;
 
 /**
  * Rules as an n-dimensional field of smooth noise. Every rule has its own
@@ -31,6 +33,13 @@ const WAVES = 5;
  *  - image:  each rule looks at a 2D picture through its own random linear
  *    projection R^n → R^2 (mirror-tiled so there are no seams), reading one
  *    colour channel. Bright/dark regions of the picture become rule regions.
+ *
+ *  - axes:   "rotated rule space". Picture a 100-D space with one axis per
+ *    rule, where each axis carries its own 1-D noise (so rule r only cares
+ *    how far along axis r you are). Field space is a randomly rotated copy
+ *    of it: a point x in field space is the rule-space point Q·x, with Q a
+ *    seeded random rotation. So a step along any field axis is a diagonal in
+ *    rule space and nudges many rules at once. In this mode dims = 100.
  *
  * `activity` moves the threshold: higher → more rules on at once.
  */
@@ -45,14 +54,20 @@ export class NoiseFieldRules implements RuleField {
   private waves!: Float64Array;
   /** Per rule: 2 × n projection, 2 offsets, 1 channel. */
   private proj!: Float64Array;
+  /** Axes mode: rotation, row r = rule r's axis expressed in field coords. */
+  private rot: Float64Array | null = null;
+  /** Axes mode: per rule × wave: frequency, phase. */
+  private axisWaves!: Float64Array;
 
-  constructor(seed: number, readonly dims = 8) {
+  constructor(seed: number, private readonly baseDims = 8) {
     this.seedV = seed >>> 0;
     this.build();
     this.setImage(null);
   }
 
   get seed() { return this.seedV; }
+  /** 8 for the noise sources (by default); one per rule for rotated rule space. */
+  get dims() { return this.source === 'axes' ? IDS.length : this.baseDims; }
   setSeed(seed: number) {
     if ((seed >>> 0) === this.seedV) return;
     this.seedV = seed >>> 0;
@@ -79,7 +94,14 @@ export class NoiseFieldRules implements RuleField {
   }
 
   private build() {
-    const n = this.dims;
+    this.rot = null; // built on first use
+    const ar = new Rng(hash32('rule-axes', this.seedV));
+    this.axisWaves = new Float64Array(IDS.length * AXIS_WAVES * 2);
+    for (let i = 0; i < IDS.length * AXIS_WAVES; i++) {
+      this.axisWaves[i * 2] = ar.range(2, 5);
+      this.axisWaves[i * 2 + 1] = ar.range(0, Math.PI * 2);
+    }
+    const n = this.baseDims;
     const rng = new Rng(hash32('noise-field', this.seedV, n));
     const gauss = () => {
       const u = Math.max(1e-9, rng.next()), v = rng.next();
@@ -112,9 +134,45 @@ export class NoiseFieldRules implements RuleField {
     }
   }
 
+  /** A seeded random rotation of R^N (Gram–Schmidt on a Gaussian matrix). */
+  private rotation(): Float64Array {
+    if (this.rot) return this.rot;
+    const N = IDS.length;
+    const rng = new Rng(hash32('rule-rotation', this.seedV));
+    const gauss = () => {
+      const u = Math.max(1e-9, rng.next()), v = rng.next();
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    };
+    const q = new Float64Array(N * N);
+    for (let i = 0; i < q.length; i++) q[i] = gauss();
+    for (let r = 0; r < N; r++) {
+      for (let k = 0; k < r; k++) {
+        let d = 0;
+        for (let i = 0; i < N; i++) d += q[r * N + i] * q[k * N + i];
+        for (let i = 0; i < N; i++) q[r * N + i] -= d * q[k * N + i];
+      }
+      let m = 0;
+      for (let i = 0; i < N; i++) m += q[r * N + i] ** 2;
+      m = Math.sqrt(m) || 1;
+      for (let i = 0; i < N; i++) q[r * N + i] /= m;
+    }
+    return (this.rot = q);
+  }
+
   /** Raw, roughly unit-variance field value of rule r at coord. */
   private raw(r: number, c: readonly number[]): number {
-    const n = this.dims;
+    if (this.source === 'axes') {
+      const N = IDS.length, q = this.rotation();
+      let p = 0; // how far along rule r's own axis this point is
+      for (let i = 0; i < N; i++) p += q[r * N + i] * (c[i] ?? 0);
+      let sum = 0;
+      for (let k = 0; k < AXIS_WAVES; k++) {
+        const o = (r * AXIS_WAVES + k) * 2;
+        sum += Math.sin(this.axisWaves[o] * p + this.axisWaves[o + 1]);
+      }
+      return sum / Math.sqrt(AXIS_WAVES / 2);
+    }
+    const n = this.baseDims;
     if (this.source === 'image' && this.image) {
       const pb = r * (2 * n + 3);
       let u = this.proj[pb + 2 * n], v = this.proj[pb + 2 * n + 1];
@@ -139,15 +197,74 @@ export class NoiseFieldRules implements RuleField {
   sample(coord: readonly number[]): RuleState {
     const out = {} as MutableRuleState;
     const thr = 2.0 - 1.6 * this.activity;
-    for (let r = 0; r < IDS.length; r++) {
-      const t = (this.raw(r, coord) - thr) / 0.8;
-      const c = t <= 0 ? 0 : t >= 1 ? 1 : t;
-      out[IDS[r]] = Math.round(c * c * (3 - 2 * c) * 1000) / 1000; // smoothstep
+    for (let r = 0; r < IDS.length; r++) out[IDS[r]] = Math.round(strength(this.raw(r, coord), thr) * 1000) / 1000;
+    return out;
+  }
+
+  /**
+   * Every source is a nonlinearity applied to a few linear projections of the
+   * coordinate, and on a plane a projection is just base + a·du + b·dv — so a
+   * whole map slice costs no n-dimensional dot products per pixel.
+   */
+  sampleGrid(center: readonly number[], U: readonly number[], V: readonly number[], range: number, res: number): Float32Array {
+    const R = IDS.length;
+    const out = new Float32Array(res * res * R);
+    const thr = 2.0 - 1.6 * this.activity;
+    const span = (k: number) => ((res > 1 ? k / (res - 1) : 0.5) * 2 - 1) * range;
+    const proj = (w: ArrayLike<number>, o: number, n: number): [number, number, number] => {
+      let p0 = 0, pu = 0, pv = 0;
+      for (let i = 0; i < n; i++) { p0 += w[o + i] * (center[i] ?? 0); pu += w[o + i] * (U[i] ?? 0); pv += w[o + i] * (V[i] ?? 0); }
+      return [p0, pu, pv];
+    };
+    const put = (r: number, f: (a: number, b: number) => number) => {
+      for (let j = 0; j < res; j++) {
+        const b = span(j);
+        for (let i = 0; i < res; i++) out[(j * res + i) * R + r] = strength(f(span(i), b), thr);
+      }
+    };
+    const n = this.baseDims;
+    for (let r = 0; r < R; r++) {
+      if (this.source === 'axes') {
+        const [p0, pu, pv] = proj(this.rotation(), r * R, R);
+        const aw = this.axisWaves, o = r * AXIS_WAVES * 2, norm = Math.sqrt(AXIS_WAVES / 2);
+        put(r, (a, b) => {
+          const p = p0 + a * pu + b * pv;
+          let s = 0;
+          for (let k = 0; k < AXIS_WAVES; k++) s += Math.sin(aw[o + k * 2] * p + aw[o + k * 2 + 1]);
+          return s / norm;
+        });
+      } else if (this.source === 'image' && this.image) {
+        const img = this.image, pb = r * (2 * n + 3);
+        const [u0, uu, uv] = proj(this.proj, pb, n);
+        const [v0, vu, vv] = proj(this.proj, pb + n, n);
+        const ou = this.proj[pb + 2 * n], ov = this.proj[pb + 2 * n + 1], ch = this.proj[pb + 2 * n + 2];
+        const st = this.stats[ch];
+        put(r, (a, b) => (bilinear(img, pingPong(ou + u0 + a * uu + b * uv), pingPong(ov + v0 + a * vu + b * vv), ch) - st.mean) / st.std);
+      } else {
+        const forms = Array.from({ length: WAVES }, (_, k) => {
+          const base = (r * WAVES + k) * (n + 1);
+          const [p0, pu, pv] = proj(this.waves, base, n);
+          return [p0 + this.waves[base + n], pu, pv];
+        });
+        const norm = Math.sqrt(WAVES / 2);
+        put(r, (a, b) => {
+          let s = 0;
+          for (const [p0, pu, pv] of forms) s += Math.sin(p0 + a * pu + b * pv);
+          return s / norm;
+        });
+      }
     }
     return out;
   }
 
+  values(coord: readonly number[]): Float64Array {
+    const out = new Float64Array(IDS.length);
+    for (let r = 0; r < IDS.length; r++) out[r] = this.raw(r, coord);
+    return out;
+  }
+
   describe(): string {
+    if (this.source === 'axes') return `${this.dims}D rotated rule space · activity ${Math.round(this.activity * 100)}%`;
     return `${this.dims}D ${this.source === 'image' ? (this.hasImage() ? 'image' : 'placeholder image') : 'random'} noise · activity ${Math.round(this.activity * 100)}%`;
   }
 
@@ -157,12 +274,19 @@ export class NoiseFieldRules implements RuleField {
 
   restore(s: unknown): void {
     const st = s as FieldState;
-    this.source = st.source === 'image' ? 'image' : 'random';
+    this.source = st.source === 'image' || st.source === 'axes' ? st.source : 'random';
     this.activity = st.activity ?? 0.45;
     this.seedV = 0xffffffff; // force rebuild
     this.setSeed(st.seed);
     this.setImage(st.image ?? null);
   }
+}
+
+/** Raw value → strength: off below the threshold, smoothstep up to full over 0.8. */
+function strength(raw: number, thr: number): number {
+  const t = (raw - thr) / 0.8;
+  const c = t <= 0 ? 0 : t >= 1 ? 1 : t;
+  return c * c * (3 - 2 * c);
 }
 
 // ── image helpers ─────────────────────────────────────────────────────

@@ -12,6 +12,17 @@ export interface Intent {
   /** Cycle the map's dims: -1 previous, +1 next (one tick per key press). */
   cycleX?: number;
   cycleY?: number;
+  /** Turn the map: tilt its horizontal / vertical axis toward (+1) or away from (-1)
+   *  the depth axis, or spin it within its own plane. Held, like movement. */
+  turnX?: number;
+  turnY?: number;
+  spin?: number;
+  /** Cycle the depth axis (one tick per press). */
+  cycleZ?: number;
+  /** Start turning the map's → axis toward the direction that strengthens this rule (one tick). */
+  aim?: string;
+  /** Straighten the map back to the field's own axes (one tick). */
+  resetTurn?: boolean;
   /** Spend one banked coin / all of them on influence (one tick per press). */
   spend?: boolean;
   spendAll?: boolean;

@@ -45,9 +45,19 @@ export interface PlayerEnt extends Body {
   // ── rule-field exploration
   /** This player's position in the n-dimensional rule field. */
   coord: number[];
-  /** The two field dimensions this player's field map shows (and arrows move along). */
+  /** Which of this player's axes the field map shows (and the arrows move along). */
   dimX: number;
   dimY: number;
+  /** The "depth" axis: the one the map's axes tilt toward when turning. */
+  dimZ: number;
+  /**
+   * This player's orientation in the field: an n×n rotation, column k = the
+   * field direction their axis k points along (flat, column-major).
+   * null = not turned (axis k is field dim k).
+   */
+  frame: number[] | null;
+  /** While steering toward a rule: the field direction to turn the map's → axis to. */
+  aimDir: number[] | null;
   /** Coins banked for spending on influence. */
   wallet: number;
   /** Pull on the shared rule position; decays over time. */
@@ -200,7 +210,8 @@ export function newPlayer(w: World, info: PlayerInfo, at: Vec): PlayerEnt {
     prevAction: false, actionCd: 0, autoT: 0, dashT: 0, shieldT: 0, invulnT: 1.5,
     combo: 0, comboT: 0, distAcc: 0, stillAcc: 0, trailT: 0, padCd: 0, portalCd: 0, stealCd: 0,
     shootCd: 0,
-    coord: [...w.fieldOrigin], dimX: 0, dimY: Math.min(1, w.fieldDims - 1), wallet: 0, influence: 0,
+    coord: [...w.fieldOrigin], dimX: 0, dimY: Math.min(1, w.fieldDims - 1), dimZ: Math.min(2, w.fieldDims - 1),
+    frame: null, aimDir: null, wallet: 0, influence: 0,
   };
 }
 

@@ -40,6 +40,18 @@ export interface RuleField {
   readonly name: string;
   readonly dims: number;
   sample(coord: readonly number[]): RuleState;
+  /**
+   * Optional: every rule's raw, unthresholded field value at coord (CATALOG
+   * order; higher = more on). Lets players steer toward a rule and see which
+   * rules a direction pushes.
+   */
+  values?(coord: readonly number[]): ArrayLike<number>;
+  /**
+   * Optional fast path for maps: rule strengths on a res×res grid over the
+   * plane center + a·u + b·v, a and b from −range to +range.
+   * Layout: out[(row * res + col) * ruleCount + rule].
+   */
+  sampleGrid?(center: readonly number[], u: readonly number[], v: readonly number[], range: number, res: number): Float32Array;
   /** Optional human-readable status. */
   describe?(): string;
   /** Optional save/sync support (plain JSON). */

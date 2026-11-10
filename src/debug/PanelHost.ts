@@ -42,8 +42,8 @@ export interface PanelHost {
     shareLink(): string;
   };
   field: {
-    getSource(): 'random' | 'image';
-    setSource(s: 'random' | 'image'): void;
+    getSource(): 'random' | 'image' | 'axes';
+    setSource(s: 'random' | 'image' | 'axes'): void;
     hasImage(): boolean;
     loadImage(file: File): Promise<string | null>; // error message or null
     clearImage(): void;
@@ -52,6 +52,9 @@ export interface PanelHost {
     getWalk(): number;
     setWalk(v: number): void;
     dims(): number;
+    /** Turn your map's → axis toward the way this rule gets stronger. */
+    steer(id: string): void;
+    straighten(): void;
   };
   saves: {
     list(): SaveMeta[];
