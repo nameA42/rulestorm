@@ -65,8 +65,8 @@ export class Game {
   world: World;
   params: Params = defaultParams();
   ruleMode: RuleMode = 'seed';
-  /** How far walking across the arena moves you in the field (units per arena width). */
-  fieldWalk = 3;
+  /** How far walking across the arena moves you in the field (units per arena width; 0 = off, the default). */
+  fieldWalk = 0;
   seed: Seed | null = null;
   /** What the rules system asked for. */
   target: RuleState = emptyRuleState();
@@ -169,7 +169,7 @@ export class Game {
     this.sections.clear();
     for (const [c, m] of snap.sections ?? []) this.sections.set(c, m);
     this.ruleMode = snap.ruleMode ?? 'seed';
-    this.fieldWalk = snap.fieldWalk ?? 3;
+    this.fieldWalk = snap.fieldWalk ?? 0;
     this.announced = new Set(RULE_IDS.filter((id) => this.target[id] > 0.05));
     this.applyOverrides();
   }

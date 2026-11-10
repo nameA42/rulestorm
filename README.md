@@ -31,7 +31,7 @@ npm test         # determinism, all 100 rules smoke-tested, generator properties
 
 **What makes the rules change** (panel → "Rules change by"):
 - **✦ Noise field** (gradual): the rules are an 8-dimensional field of smooth noise. Every point in that space is a rule set, and nearby points are similar, so moving changes the rules gradually rather than all at once.
-  - **Your position:** each player has their own position in the field. The arrow keys move you through it, and walking around the arena also nudges you along dims 0 and 1 (the *Walk* slider; 0 turns it off).
+  - **Your position:** each player has their own position in the field. The arrow keys move you through it. Optionally, walking around the arena can also nudge you along dims 0 and 1: the *Walk* slider, which is off (0) by default.
   - **Shared rules:** the rules everyone plays under come from the players' average field position, weighted by influence.
   - **Influence:** every coin you pick up goes into your wallet. Spending coins (Q, or Shift+Q for all) adds influence, which pulls the shared rules toward your spot. Influence halves every 15 seconds.
   - **Noise source:** *Random* sums random plane waves. *Image* reads a picture you load: each rule looks at it through its own random projection from 8D to 2D, so bright and dark regions become rule regions.
