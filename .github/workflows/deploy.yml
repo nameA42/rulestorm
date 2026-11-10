@@ -26,6 +26,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+        env:
+          # Optional TURN relay(s) for online play, as JSON (see src/vite-env.d.ts).
+          VITE_ICE_SERVERS: ${{ secrets.ICE_SERVERS }}
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

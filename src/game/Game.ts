@@ -99,6 +99,7 @@ export class Game {
     this.refreshRules();
     this.blend();
     stepWorld(this.world, this.params, inputs, DT);
+    this.boundPlayers();
     return true;
   }
 
@@ -235,6 +236,17 @@ export class Game {
       pl.dimZ = Math.min(2, n - 1);
     }
     w.fieldCoord = sharedFieldPos(w, this.fieldWalk);
+  }
+
+  /** Keep everyone inside the field's allowed region, if it has one. */
+  private boundPlayers() {
+    const field = this.deps.field;
+    if (!field.bound || this.ruleMode !== 'field') return;
+    for (const pl of this.world.players) {
+      if (pl.coord.length !== this.world.fieldDims) continue;
+      const b = field.bound(pl.coord);
+      if (b) pl.coord = b;
+    }
   }
 
   /** "Steer toward rule X": remember which way that rule gets stronger from where you are. */

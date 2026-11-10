@@ -109,6 +109,74 @@ describe('rotated rule space', () => {
     }
   });
 
+  it('aligned: each field axis moves exactly one rule; a random tilt mixes them again', () => {
+    const f = axes(8);
+    f.setTilt(0);
+    expect(f.describe()).toContain('aligned');
+    const c = new Array(N).fill(0.7);
+    const base = f.values(c);
+    for (const k of [0, 13, 57, 99]) {
+      const moved = f.values(c.map((v, i) => (i === k ? v + 0.3 : v)));
+      const changed = RULE_IDS.map((_, r) => r).filter((r) => Math.abs(moved[r] - base[r]) > 1e-12);
+      expect(changed).toEqual([k]);
+    }
+    f.setTilt(12345);
+    const a = f.values(c), b = f.values(c.map((v, i) => (i === 0 ? v + 0.05 : v)));
+    expect(RULE_IDS.filter((_, r) => Math.abs(a[r] - b[r]) > 1e-4).length).toBeGreaterThan(80);
+    const g = new NoiseFieldRules(1);
+    g.restore(f.snapshot());
+    expect(g.tilt).toBe(12345);
+    expect(g.values(c)).toEqual(f.values(c));
+  });
+
+  it('waves per axis: more waves change the profile; the default is unchanged; the map fast path agrees', () => {
+    const rng = new Rng(21);
+    const c = Array.from({ length: N }, () => rng.range(-5, 5));
+    const f = axes(3);
+    expect(f.axisWaveCount).toBe(3);
+    const three = f.values(c);
+    f.setAxisWaves(6);
+    expect(f.values(c)).not.toEqual(three);
+    expect(f.describe()).toContain('6 waves/axis');
+    f.setAxisWaves(3);
+    expect(f.values(c)).toEqual(three);
+    f.setAxisWaves(99);
+    expect(f.axisWaveCount).toBe(8);
+    for (const k of [0, 1, 5, 8]) {
+      f.setAxisWaves(k);
+      const U = new Array(N).fill(0), V = new Array(N).fill(0);
+      U[0] = 1; V[4] = 1;
+      const grid = f.sampleGrid(c, U, V, 3, 5);
+      const st = f.sample(c.map((v, i) => v + (i === 0 ? 1.5 : 0) + (i === 4 ? -3 : 0)));
+      RULE_IDS.forEach((id, r) => expect(grid[(0 * 5 + 3) * N + r]).toBeCloseTo(st[id], 2));
+    }
+  });
+
+  it('0 waves is linear: strength = your coordinate on the rule axis, bounded to 0..1', () => {
+    const f = axes(5);
+    f.setAxisWaves(0);
+    f.setTilt(0);
+    expect(f.describe()).toContain('linear');
+    const c = new Array(N).fill(0);
+    c[0] = 0.25; c[1] = 0.8; c[2] = 1.7; c[3] = -0.4;
+    const st = f.sample(c);
+    expect([st[RULE_IDS[0]], st[RULE_IDS[1]], st[RULE_IDS[2]], st[RULE_IDS[3]], st[RULE_IDS[4]]]).toEqual([0.25, 0.8, 1, 0, 0]);
+    expect(f.bound(c.map((v) => Math.min(1, Math.max(0, v))))).toBeNull();
+    const b = f.bound(c)!;
+    expect([b[0], b[1], b[2], b[3]]).toEqual([0.25, 0.8, 1, 0]);
+    // Tilted: the bound is in rule coordinates, so every rule coordinate ends up in 0..1.
+    f.setTilt(777);
+    const rng = new Rng(8);
+    const far = Array.from({ length: N }, () => rng.range(-3, 3));
+    const inside = f.bound(far)!;
+    const p = f.values(inside); // linear: values are the rule coordinates
+    for (let r = 0; r < N; r++) { expect(p[r]).toBeGreaterThan(-1e-9); expect(p[r]).toBeLessThan(1 + 1e-9); }
+    expect(f.bound(inside)).toBeNull();
+    // other modes are unbounded
+    f.setAxisWaves(2);
+    expect(f.bound(far)).toBeNull();
+  });
+
   it('survives a snapshot', () => {
     const f = axes(12);
     const c = new Array(N).fill(1.5);
@@ -169,6 +237,33 @@ describe('turning and steering in the game', () => {
     g.setRuleMode('field');
     return { g, field };
   }
+
+  it('linear mode keeps travellers inside the 0..1 box; travel along a rule axis takes it from off to full', () => {
+    const ps = new Scripted([P('p1')]);
+    const { g, field } = game(ps);
+    field.setTilt(0);
+    field.setAxisWaves(0);
+    g.step();
+    const me = g.world.players[0];
+    me.coord = new Array(N).fill(0.5);
+    ps.script = () => ({ navX: 1 });
+    for (let i = 0; i < 120; i++) g.step(); // 1.8 units: hits the wall at 1
+    expect(me.coord[0]).toBeCloseTo(1, 9);
+    expect(g.target[RULE_IDS[0]]).toBe(1);
+    ps.script = () => ({ navX: -1 });
+    for (let i = 0; i < 120; i++) g.step();
+    expect(me.coord[0]).toBeCloseTo(0, 9);
+    expect(g.target[RULE_IDS[0]]).toBe(0);
+    expect(me.coord[1]).toBeCloseTo(0.5, 9); // other rules untouched
+    // Tilted: travelling slides along the walls but never leaves the box.
+    field.setTilt(4242);
+    ps.script = (t) => ({ navX: 1, navY: t % 200 < 100 ? 1 : -1, turnX: t % 50 < 10 ? 1 : 0 });
+    for (let i = 0; i < 400; i++) {
+      g.step();
+      const p = field.values(me.coord);
+      for (let r = 0; r < N; r++) expect(p[r] >= -1e-9 && p[r] <= 1 + 1e-9).toBe(true);
+    }
+  });
 
   it('the world resizes when the field changes dimension', () => {
     const ps = new Scripted([P('p1')]);

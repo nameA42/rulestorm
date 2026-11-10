@@ -1,3 +1,4 @@
+import { hasRelay } from './net/peerTransport';
 import Phaser from 'phaser';
 import type { AppCommand } from './app/commands';
 import { fileToFieldImage } from './app/fieldImage';
@@ -146,6 +147,11 @@ const app: PanelHost = {
     dims: () => field.dims,
     steer: (id) => keyboard.aim(id),
     straighten: () => keyboard.straighten(),
+    align: () => { dispatch({ k: 'fieldTilt', tilt: 0 }); keyboard.straighten(); },
+    randomTilt: () => { dispatch({ k: 'fieldTilt', tilt: randomSeed() || 1 }); keyboard.straighten(); },
+    isAligned: () => field.tilt === 0,
+    getWaves: () => field.axisWaveCount,
+    setWaves: (count) => dispatch({ k: 'fieldWaves', count }),
   },
   saves: {
     list: () => store.list(),
@@ -165,6 +171,7 @@ const app: PanelHost = {
     mode: () => session.mode,
     room: () => session.room,
     error: () => session.error,
+    hasRelay: () => hasRelay(),
     info: () => session.net?.info() ?? null,
     inviteLink: () => session.shareLink(),
     host: () => { void session.host(); },

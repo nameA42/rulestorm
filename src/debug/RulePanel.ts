@@ -79,6 +79,15 @@ export class RulePanel {
             <div class="row">
               <label title="How far walking across the arena moves you through the field (0 = only the arrow keys move you)">Walk <input id="walk" type="range" min="0" max="10" step="0.5"> <span id="walkv" class="num"></span></label>
             </div>
+            <div class="row" id="tiltRow">
+              <span class="lbl">Tilt</span>
+              <button id="align" title="Line field space up with rule space: each field axis is exactly one rule (and straighten your map)">⊞ Align</button>
+              <button id="randomTilt" title="Pick a new random rotation of field space within rule space (and straighten your map)">🎲 Random tilt</button>
+              <span id="tiltState" class="muted small"></span>
+            </div>
+            <div class="row" id="wavesRow">
+              <label title="Sine waves along each rule's own axis. More waves give busier, less regular bands. 0 is linear: a rule's strength is your coordinate on its axis, and you stay between 0 and 1 on every axis.">Waves per axis <input id="waves" type="range" min="0" max="8" step="1"> <span id="wavesv" class="num"></span></label>
+            </div>
             <div class="row"><button id="straighten" title="Turn your map back to the field's own axes (O)">⟲ Straighten map</button><span class="muted small">⌖ on a rule turns your → axis toward it</span></div>
             <div class="row muted small">Arrows travel · Shift+arrows turn the map toward the depth axis · , . spin · Z/X, C/V pick map axes · B/N pick depth axis · O straighten · Q spends a coin for influence, Shift+Q all · M shows/hides the map</div>
           </div>
@@ -163,6 +172,11 @@ export class RulePanel {
       b.onclick = () => h.field.setSource(b.dataset.src as 'random' | 'image' | 'axes');
     }
     el.straighten.onclick = () => h.field.straighten();
+    el.align.onclick = () => h.field.align();
+    const wv = el.waves as HTMLInputElement;
+    wv.value = String(h.field.getWaves());
+    wv.oninput = () => { el.wavesv.textContent = Number(wv.value) ? wv.value : 'linear 0–1'; h.field.setWaves(Number(wv.value)); };
+    el.randomTilt.onclick = () => h.field.randomTilt();
     const imgIn = el.imgIn as HTMLInputElement;
     imgIn.onchange = async () => {
       const f = imgIn.files?.[0];
@@ -257,7 +271,7 @@ export class RulePanel {
         : mode === 'joining' ? `joining ${n.room()}…`
         : !info ? 'creating room…'
         : `${info.role === 'host' ? 'hosting' : 'in'} room ${n.room()} as ${info.me ?? '…'}${info.desyncs ? ` · ${info.desyncs} resync` : ''}`;
-    el.netErr.textContent = n.error() ?? '';
+    el.netErr.textContent = n.error() ?? (mode !== 'offline' && !n.hasRelay() ? 'No relay server is set up, so players on strict networks (many mobile, school and office ones) may not be able to join.' : '');
 
     const sig = info ? info.roster.map((p) => `${p.id}${p.local}`).join(',') : '';
     if (sig !== this.rosterSig) {
@@ -317,6 +331,14 @@ export class RulePanel {
     this.root.classList.toggle('fieldmode', mode === 'field');
     const src = h.field.getSource();
     for (const b of el.fsrc.querySelectorAll<HTMLButtonElement>('button')) b.classList.toggle('active', b.dataset.src === src);
+    el.tiltRow.style.display = src === 'axes' ? '' : 'none';
+    el.wavesRow.style.display = src === 'axes' ? '' : 'none';
+    if (document.activeElement !== el.waves) {
+      (el.waves as HTMLInputElement).value = String(h.field.getWaves());
+      el.wavesv.textContent = h.field.getWaves() ? String(h.field.getWaves()) : 'linear 0–1';
+    }
+    el.align.classList.toggle('active', h.field.isAligned());
+    el.tiltState.textContent = h.field.isAligned() ? 'aligned: axis k = rule k' : 'rotated';
     if (!el.imgState.textContent || el.imgState.dataset.auto === '1') {
       el.imgState.dataset.auto = '1';
       el.imgState.textContent = src === 'image' ? (h.field.hasImage() ? 'using your picture' : 'using a placeholder picture — load your own')

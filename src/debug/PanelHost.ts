@@ -55,6 +55,14 @@ export interface PanelHost {
     /** Turn your map's → axis toward the way this rule gets stronger. */
     steer(id: string): void;
     straighten(): void;
+    /** Rule space: line field space up with the rule axes (and straighten your map). */
+    align(): void;
+    /** Rule space: a new random rotation of field space (and straighten your map). */
+    randomTilt(): void;
+    isAligned(): boolean;
+    /** Rule space: sine waves per rule axis (0 = linear, bounded 0..1). */
+    getWaves(): number;
+    setWaves(n: number): void;
   };
   saves: {
     list(): SaveMeta[];
@@ -66,6 +74,8 @@ export interface PanelHost {
     mode(): NetMode;
     room(): string | null;
     error(): string | null;
+    /** Whether a TURN relay is configured (without one, some networks can't connect). */
+    hasRelay(): boolean;
     info(): NetInfo | null;
     inviteLink(): string | null;
     host(): void;

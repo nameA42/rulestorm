@@ -27,6 +27,8 @@ export type AppCommand =
   | { k: 'fieldImage'; image: FieldImage | null }
   | { k: 'fieldActivity'; value: number }
   | { k: 'fieldWalk'; value: number }
+  | { k: 'fieldTilt'; tilt: number }
+  | { k: 'fieldWaves'; count: number }
   | { k: 'restart'; worldSeed: number }
   | { k: 'load'; data: SaveData };
 
@@ -87,6 +89,8 @@ export function applyCommand(s: AppState, c: AppCommand) {
     case 'fieldImage': s.field.setImage(c.image); if (c.image) s.field.source = 'image'; break;
     case 'fieldActivity': s.field.activity = Math.max(0, Math.min(1, c.value)); break;
     case 'fieldWalk': game.fieldWalk = Math.max(0, c.value); break;
+    case 'fieldTilt': s.field.setTilt(c.tilt); break;
+    case 'fieldWaves': s.field.setAxisWaves(c.count); break;
     case 'restart':
       s.worldSeed = c.worldSeed;
       seeds.baseSeed = c.worldSeed;

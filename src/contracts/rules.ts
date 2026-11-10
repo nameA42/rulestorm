@@ -52,6 +52,13 @@ export interface RuleField {
    * Layout: out[(row * res + col) * ruleCount + rule].
    */
   sampleGrid?(center: readonly number[], u: readonly number[], v: readonly number[], range: number, res: number): Float32Array;
+  /**
+   * Optional: if this field only allows part of the space, the nearest allowed
+   * position to coord, or null when coord is already allowed.
+   */
+  bound?(coord: readonly number[]): number[] | null;
+  /** Optional: a good half-width for map slices, in field units (default 3). */
+  mapRange?(): number;
   /** Optional human-readable status. */
   describe?(): string;
   /** Optional save/sync support (plain JSON). */

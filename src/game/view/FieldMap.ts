@@ -5,7 +5,7 @@ import { axis, isTurned } from '../frame';
 import type { Game } from '../Game';
 
 const RES = 44; // samples per side
-const RANGE = 3; // field units from centre to edge
+const RANGE = 3; // default field units from centre to edge (fields can ask for another)
 const SIZE = 220; // css px
 
 const CAT_COLOR: Record<RuleCategory, [number, number, number]> = {
@@ -36,6 +36,8 @@ export class FieldMap {
   private U: number[] = [];
   private V: number[] = [];
   private pushes: HTMLDivElement;
+  /** Half-width of the slice, in field units. */
+  private range = RANGE;
   shown = true;
 
   constructor(host: HTMLElement, private game: Game) {
@@ -86,10 +88,11 @@ export class FieldMap {
     this.U = me ? axis(me, n, dx) : unit(n, 0);
     this.V = me ? axis(me, n, dy) : unit(n, 1);
     const turned = me && isTurned(me);
-    this.title.textContent = `Field map · ${field.dims}D · axis ${dx} → / ${dy} ↓ · depth ${me?.dimZ ?? 2}${turned ? ' · turned' : ''}${me?.aimDir ? ' · steering…' : ''}`;
+    this.title.textContent = `Field map · ${field.dims}D · ±${field.mapRange?.() ?? RANGE} · axis ${dx} → / ${dy} ↓ · depth ${me?.dimZ ?? 2}${turned ? ' · turned' : ''}${me?.aimDir ? ' · steering…' : ''}`;
 
     // Re-render the slice only when it changed (it's ~2k field samples).
-    const key = `${this.center.map((v) => v.toFixed(2)).join(',')}|${dx},${dy}|${sig(this.U)}|${sig(this.V)}|${field.describe?.() ?? ''}`;
+    this.range = field.mapRange?.() ?? RANGE;
+    const key = `${this.range}|${this.center.map((v) => v.toFixed(2)).join(',')}|${dx},${dy}|${sig(this.U)}|${sig(this.V)}|${field.describe?.() ?? ''}`;
     const now = performance.now();
     if (key !== this.lastKey && now - this.lastDraw > 60) {
       this.lastKey = key;
@@ -110,9 +113,17 @@ export class FieldMap {
     const img = ctx.createImageData(RES, RES);
     const field = this.game.deps.field;
     if (field.sampleGrid) {
-      const grid = field.sampleGrid(this.center, this.U, this.V, RANGE, RES);
+      const grid = field.sampleGrid(this.center, this.U, this.V, this.range, RES);
       for (let k = 0; k < RES * RES; k++) {
-        const [r, g, b] = colorOfGrid(grid, k * RULE_IDS.length);
+        let [r, g, b] = colorOfGrid(grid, k * RULE_IDS.length);
+        // Fields with a bounded region: darken the part you can't reach.
+        if (field.bound) {
+          const i = k % RES, j = Math.floor(k / RES);
+          if (field.bound(this.at(((i / (RES - 1)) * 2 - 1) * this.range, ((j / (RES - 1)) * 2 - 1) * this.range))) {
+            const stripe = (i + j) % 6 < 2;
+            [r, g, b] = stripe ? [r * 0.35 + 30, g * 0.35 + 30, b * 0.35 + 34] : [r * 0.25, g * 0.25, b * 0.25];
+          }
+        }
         img.data[k * 4] = r; img.data[k * 4 + 1] = g; img.data[k * 4 + 2] = b; img.data[k * 4 + 3] = 255;
       }
       ctx.putImageData(img, 0, 0);
@@ -120,7 +131,7 @@ export class FieldMap {
     }
     for (let j = 0; j < RES; j++) {
       for (let i = 0; i < RES; i++) {
-        const c = this.at(((i / (RES - 1)) * 2 - 1) * RANGE, ((j / (RES - 1)) * 2 - 1) * RANGE);
+        const c = this.at(((i / (RES - 1)) * 2 - 1) * this.range, ((j / (RES - 1)) * 2 - 1) * this.range);
         const [r, g, b] = colorOf(this.game.deps.field.sample(c));
         const o = (j * RES + i) * 4;
         img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
@@ -153,7 +164,7 @@ export class FieldMap {
       a += d * this.U[i];
       b += d * this.V[i];
     }
-    return [((a / RANGE + 1) / 2) * SIZE, ((b / RANGE + 1) / 2) * SIZE];
+    return [((a / this.range + 1) / 2) * SIZE, ((b / this.range + 1) / 2) * SIZE];
   }
 
   private drawMarkers() {
@@ -191,7 +202,7 @@ export class FieldMap {
   private hover(e: MouseEvent) {
     const r = this.canvas.getBoundingClientRect();
     const u = (e.clientX - r.left) / r.width, v = (e.clientY - r.top) / r.height;
-    const c = this.at((u * 2 - 1) * RANGE, (v * 2 - 1) * RANGE);
+    const c = this.at((u * 2 - 1) * this.range, (v * 2 - 1) * this.range);
     const st = this.game.deps.field.sample(c);
     const top = RULE_IDS.filter((id) => st[id] > 0.02).sort((a, b) => st[b] - st[a]).slice(0, 7);
     this.tip.innerHTML = top.length
